@@ -59,18 +59,21 @@ const COMPONENT_LABELS = {
 };
 
 export class DatasetReplayEngine {
-  constructor(dataDir = 'E:/Danfoss Project/dataset', fastApiUrl = 'http://127.0.0.1:8000') {
+  constructor(
+    dataDir = process.env.DATASET_DIR || 'E:/Danfoss Project/dataset',
+    fastApiUrl = process.env.FASTAPI_URL || 'http://127.0.0.1:8000'
+  ) {
     this.dataDir = dataDir;
     this.fastApiUrl = fastApiUrl;
-    
+
     this.profileData = []; // Cached profile lines: array of { cooler, valve, pump_leakage, accumulator, stable_flag }
     this.currentCycleNumber = 1;
     this.maxCycles = 2205;
-    
+
     this.cycleRawCache = new Map(); // Cache recent cycle sensor dicts
     this.lastMlPrediction = null;
     this.isFastApiAvailable = false;
-    
+
     this.initProfile();
   }
 
@@ -118,10 +121,10 @@ export class DatasetReplayEngine {
       if (!fs.existsSync(filePath)) {
         throw new Error(`Dataset sensor file missing: ${filePath}`);
       }
-      
+
       const fileStream = fs.createReadStream(filePath);
       const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-      
+
       let currentLine = 0;
       let lineFound = false;
       for await (const line of rl) {
@@ -180,10 +183,10 @@ export class DatasetReplayEngine {
         const predictedVal = result.predictions[target];
         const actualVal = groundTruth ? groundTruth[target] : null;
         const probs = result.probabilities[target] || {};
-        
+
         // Find predicted class probability
-        const probForPredicted = probs[String(predictedVal)] !== undefined 
-          ? probs[String(predictedVal)] 
+        const probForPredicted = probs[String(predictedVal)] !== undefined
+          ? probs[String(predictedVal)]
           : (probs[predictedVal] !== undefined ? probs[predictedVal] : 0.0);
 
         comparison.push({
