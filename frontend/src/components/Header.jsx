@@ -8,7 +8,10 @@ import {
   Database,
   LayoutDashboard,
   LineChart,
-  Cpu
+  Cpu,
+  Zap,
+  FileCheck,
+  Sliders
 } from 'lucide-react';
 
 export function Header({
@@ -25,6 +28,9 @@ export function Header({
   const navItems = [
     { id: 'main', label: 'Main Dashboard', icon: LayoutDashboard },
     { id: 'cycle', label: 'Cycle Analysis', icon: LineChart },
+    { id: 'energy', label: 'Energy Analytics', icon: Zap },
+    { id: 'optimization', label: 'Parameter Optimization', icon: Sliders },
+    { id: 'traceability', label: 'Digital Traceability', icon: FileCheck },
     { id: 'ml', label: 'ML Predictions', icon: Cpu }
   ];
 

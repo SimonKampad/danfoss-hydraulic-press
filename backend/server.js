@@ -6,6 +6,8 @@ import { HydraulicSimulator } from './simulation/hydraulicSimulator.js';
 import { PerformanceService } from './services/performanceService.js';
 import { AnalyticsService } from './services/analyticsService.js';
 import { DatasetReplayEngine } from './services/datasetReplayEngine.js';
+import { TraceabilityService } from './services/traceabilityService.js';
+import { OptimizationService } from './services/optimizationService.js';
 import { setupSocketHandler } from './socket/socketHandler.js';
 import { GROUP_2_SPECIFICATIONS, SIMULATION_THRESHOLDS, CYCLE_PHASES } from './config/pressConfig.js';
 
@@ -25,6 +27,8 @@ const simulator = new HydraulicSimulator();
 const performanceService = new PerformanceService();
 const analyticsService = new AnalyticsService();
 const datasetEngine = new DatasetReplayEngine();
+const traceabilityService = new TraceabilityService();
+const optimizationService = new OptimizationService();
 
 // System mode state: 'SIMULATION' | 'DATASET_REPLAY'
 let systemMode = 'SIMULATION';
@@ -37,7 +41,7 @@ const io = new Server(httpServer, {
   }
 });
 
-setupSocketHandler(io, simulator, performanceService, analyticsService, datasetEngine, () => systemMode, (newMode) => { systemMode = newMode; });
+setupSocketHandler(io, simulator, performanceService, analyticsService, datasetEngine, traceabilityService, optimizationService, () => systemMode, (newMode) => { systemMode = newMode; });
 
 // REST API Endpoints for Dashboard / External Integrations / Future Hardware
 app.get('/api/status', (req, res) => {
@@ -69,6 +73,20 @@ app.get('/api/performance', (req, res) => {
 
 app.get('/api/analytics', (req, res) => {
   res.json(analyticsService.getAnalyticsReport());
+});
+
+app.get('/api/optimization', (req, res) => {
+  res.json(optimizationService.generateOptimizationReport(performanceService.getStats()));
+});
+
+app.get('/api/traceability/records', (req, res) => {
+  res.json(traceabilityService.getRecords());
+});
+
+app.get('/api/traceability/record/:cycle', (req, res) => {
+  const rec = traceabilityService.getRecordByCycle(req.params.cycle);
+  if (!rec) return res.status(404).json({ error: 'Record not found' });
+  res.json(rec);
 });
 
 app.get('/api/ml-prediction', async (req, res) => {

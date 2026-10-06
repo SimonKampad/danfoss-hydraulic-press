@@ -1,0 +1,599 @@
+warning: in the working copy of 'backend/server.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/services/performanceService.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/socket/socketHandler.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/components/Header.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/components/MainDashboardView.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/hooks/useRealtimeData.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/pages/Dashboard.jsx', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/backend/server.js b/backend/server.js[m
+[1mindex 2edf3e8..6107da8 100644[m
+[1m--- a/backend/server.js[m
+[1m+++ b/backend/server.js[m
+[36m@@ -6,6 +6,8 @@[m [mimport { HydraulicSimulator } from './simulation/hydraulicSimulator.js';[m
+ import { PerformanceService } from './services/performanceService.js';[m
+ import { AnalyticsService } from './services/analyticsService.js';[m
+ import { DatasetReplayEngine } from './services/datasetReplayEngine.js';[m
+[32m+[m[32mimport { TraceabilityService } from './services/traceabilityService.js';[m
+[32m+[m[32mimport { OptimizationService } from './services/optimizationService.js';[m
+ import { setupSocketHandler } from './socket/socketHandler.js';[m
+ import { GROUP_2_SPECIFICATIONS, SIMULATION_THRESHOLDS, CYCLE_PHASES } from './config/pressConfig.js';[m
+ [m
+[36m@@ -25,6 +27,8 @@[m [mconst simulator = new HydraulicSimulator();[m
+ const performanceService = new PerformanceService();[m
+ const analyticsService = new AnalyticsService();[m
+ const datasetEngine = new DatasetReplayEngine();[m
+[32m+[m[32mconst traceabilityService = new TraceabilityService();[m
+[32m+[m[32mconst optimizationService = new OptimizationService();[m
+ [m
+ // System mode state: 'SIMULATION' | 'DATASET_REPLAY'[m
+ let systemMode = 'SIMULATION';[m
+[36m@@ -37,7 +41,7 @@[m [mconst io = new Server(httpServer, {[m
+   }[m
+ });[m
+ [m
+[31m-setupSocketHandler(io, simulator, performanceService, analyticsService, datasetEngine, () => systemMode, (newMode) => { systemMode = newMode; });[m
+[32m+[m[32msetupSocketHandler(io, simulator, performanceService, analyticsService, datasetEngine, traceabilityService, optimizationService, () => systemMode, (newMode) => { systemMode = newMode; });[m
+ [m
+ // REST API Endpoints for Dashboard / External Integrations / Future Hardware[m
+ app.get('/api/status', (req, res) => {[m
+[36m@@ -71,6 +75,20 @@[m [mapp.get('/api/analytics', (req, res) => {[m
+   res.json(analyticsService.getAnalyticsReport());[m
+ });[m
+ [m
+[32m+[m[32mapp.get('/api/optimization', (req, res) => {[m
+[32m+[m[32m  res.json(optimizationService.generateOptimizationReport(performanceService.getStats()));[m
+[32m+[m[32m});[m
+[32m+[m
+[32m+[m[32mapp.get('/api/traceability/records', (req, res) => {[m
+[32m+[m[32m  res.json(traceabilityService.getRecords());[m
+[32m+[m[32m});[m
+[32m+[m
+[32m+[m[32mapp.get('/api/traceability/record/:cycle', (req, res) => {[m
+[32m+[m[32m  const rec = traceabilityService.getRecordByCycle(req.params.cycle);[m
+[32m+[m[32m  if (!rec) return res.status(404).json({ error: 'Record not found' });[m
+[32m+[m[32m  res.json(rec);[m
+[32m+[m[32m});[m
+[32m+[m
+ app.get('/api/ml-prediction', async (req, res) => {[m
+   const cycle = parseInt(req.query.cycle, 10) || datasetEngine.currentCycleNumber;[m
+   try {[m
+[1mdiff --git a/backend/services/performanceService.js b/backend/services/performanceService.js[m
+[1mindex cbc67f4..04d98ca 100644[m
+[1m--- a/backend/services/performanceService.js[m
+[1m+++ b/backend/services/performanceService.js[m
+[36m@@ -1,10 +1,11 @@[m
+ /**[m
+[31m- * Performance Calculations & Statistics Tracking Service[m
+[32m+[m[32m * Performance Calculations & Energy Analytics Service[m
+  * [m
+[31m- * Computes rolling averages, peak values, hydraulic power, [m
+[31m- * and estimated electrical energy consumption.[m
+[32m+[m[32m * Computes rolling averages, peak values, hydraulic power, motor power,[m
+[32m+[m[32m * current cycle energy consumption, average energy per cycle, total energy,[m
+[32m+[m[32m * and per-phase energy breakdown.[m
+  * [m
+[31m- * Label: All output metrics are explicitly flagged as "Simulation Estimate".[m
+[32m+[m[32m * Label: All output metrics are explicitly flagged as "Analytics Estimate".[m
+  */[m
+ [m
+ export class PerformanceService {[m
+[36m@@ -29,6 +30,23 @@[m [mexport class PerformanceService {[m
+     this.cycleStartTime = Date.now();[m
+     this.lastCycleTimeSec = 9.25; // default nominal target: 1.0 + 5.0 + 2.0 + 1.25 = 9.25s[m
+     this.cumulativeEnergyKwh = 0.0;[m
+[32m+[m
+[32m+[m[32m    // --- Energy Analytics Module State ---[m
+[32m+[m[32m    this.currentCycleNumber = 1;[m
+[32m+[m[32m    this.currentCycleEnergyWh = 0.0;[m
+[32m+[m[32m    this.currentCycleSamples = 0;[m
+[32m+[m[32m    this.currentCyclePowerSumKw = 0.0;[m
+[32m+[m[32m    this.currentCyclePeakPowerKw = 0.0;[m
+[32m+[m
+[32m+[m[32m    this.currentCyclePhaseEnergiesWh = {[m
+[32m+[m[32m      FAST_DOWN: 0.0,[m
+[32m+[m[32m      WORKING: 0.0,[m
+[32m+[m[32m      HOLDING: 0.0,[m
+[32m+[m[32m      FAST_UP: 0.0[m
+[32m+[m[32m    };[m
+[32m+[m
+[32m+[m[32m    this.cycleEnergyHistory = []; // Historical array of completed cycles { cycleNumber, energyWh, energyKwh, peakPowerKw, avgPowerKw, phaseEnergiesWh }[m
+[32m+[m[32m    this.avgEnergyPerCycleWh = 0.0;[m
+   }[m
+ [m
+   recordData(packet) {[m
+[36m@@ -46,37 +64,115 @@[m [mexport class PerformanceService {[m
+ [m
+     this.sumSpeedMmS += packet.speedMmS;[m
+ [m
+[31m-    this.completedCycles = Math.max(0, packet.cycleNumber - 1);[m
+[32m+[m[32m    const cycleNum = packet.cycleNumber || 1;[m
+[32m+[m
+[32m+[m[32m    // Cycle transition detection: record completed cycle energy metrics[m
+[32m+[m[32m    if (cycleNum > this.currentCycleNumber) {[m
+[32m+[m[32m      if (this.currentCycleSamples > 0) {[m
+[32m+[m[32m        const avgPowerKw = this.currentCyclePowerSumKw / this.currentCycleSamples;[m
+[32m+[m[32m        const cycleRecord = {[m
+[32m+[m[32m          cycleNumber: this.currentCycleNumber,[m
+[32m+[m[32m          energyWh: parseFloat(this.currentCycleEnergyWh.toFixed(2)),[m
+[32m+[m[32m          energyKwh: parseFloat((this.currentCycleEnergyWh / 1000.0).toFixed(4)),[m
+[32m+[m[32m          peakPowerKw: parseFloat(this.currentCyclePeakPowerKw.toFixed(2)),[m
+[32m+[m[32m          avgPowerKw: parseFloat(avgPowerKw.toFixed(2)),[m
+[32m+[m[32m          phaseEnergiesWh: {[m
+[32m+[m[32m            FAST_DOWN: parseFloat(this.currentCyclePhaseEnergiesWh.FAST_DOWN.toFixed(2)),[m
+[32m+[m[32m            WORKING: parseFloat(this.currentCyclePhaseEnergiesWh.WORKING.toFixed(2)),[m
+[32m+[m[32m            HOLDING: parseFloat(this.currentCyclePhaseEnergiesWh.HOLDING.toFixed(2)),[m
+[32m+[m[32m            FAST_UP: parseFloat(this.currentCyclePhaseEnergiesWh.FAST_UP.toFixed(2))[m
+[32m+[m[32m          }[m
+[32m+[m[32m        };[m
+[32m+[m
+[32m+[m[32m        this.cycleEnergyHistory.push(cycleRecord);[m
+[32m+[m[32m        if (this.cycleEnergyHistory.length > 100) {[m
+[32m+[m[32m          this.cycleEnergyHistory.shift();[m
+[32m+[m[32m        }[m
+[32m+[m
+[32m+[m[32m        const totalHistWh = this.cycleEnergyHistory.reduce((acc, c) => acc + c.energyWh, 0);[m
+[32m+[m[32m        this.avgEnergyPerCycleWh = totalHistWh / this.cycleEnergyHistory.length;[m
+[32m+[m[32m      }[m
+ [m
+[31m-    // Energy consumption increment:[m
+[31m-    // Hydraulic Power P (kW) = (Pressure (bar) * Flow (L/min)) / (600 * pumpEfficiency)[m
+[31m-    // Energy dE (kWh) = P (kW) * (dt_sec / 3600)[m
+[31m-    const dtSec = 0.1 * (packet.speedMultiplier || 1.0);[m
+[31m-    const pumpEfficiency = 0.9;[m
+[31m-    const hydraulicPowerKw = (packet.pressureBar * packet.flowLmin) / (600.0 * pumpEfficiency);[m
+[31m-    const dE = (hydraulicPowerKw * dtSec) / 3600.0;[m
+[31m-    this.cumulativeEnergyKwh += dE;[m
+[32m+[m[32m      // Reset current cycle counters for new cycle[m
+[32m+[m[32m      this.currentCycleNumber = cycleNum;[m
+[32m+[m[32m      this.currentCycleEnergyWh = 0.0;[m
+[32m+[m[32m      this.currentCycleSamples = 0;[m
+[32m+[m[32m      this.currentCyclePowerSumKw = 0.0;[m
+[32m+[m[32m      this.currentCyclePeakPowerKw = 0.0;[m
+[32m+[m[32m      this.currentCyclePhaseEnergiesWh = {[m
+[32m+[m[32m        FAST_DOWN: 0.0,[m
+[32m+[m[32m        WORKING: 0.0,[m
+[32m+[m[32m        HOLDING: 0.0,[m
+[32m+[m[32m        FAST_UP: 0.0[m
+[32m+[m[32m      };[m
+[32m+[m[32m    } else if (cycleNum < this.currentCycleNumber) {[m
+[32m+[m[32m      // System reset or manual cycle jump[m
+[32m+[m[32m      this.currentCycleNumber = cycleNum;[m
+[32m+[m[32m      this.currentCycleEnergyWh = 0.0;[m
+[32m+[m[32m      this.currentCycleSamples = 0;[m
+[32m+[m[32m      this.currentCyclePowerSumKw = 0.0;[m
+[32m+[m[32m      this.currentCyclePeakPowerKw = 0.0;[m
+[32m+[m[32m      this.currentCyclePhaseEnergiesWh = {[m
+[32m+[m[32m        FAST_DOWN: 0.0,[m
+[32m+[m[32m        WORKING: 0.0,[m
+[32m+[m[32m        HOLDING: 0.0,[m
+[32m+[m[32m        FAST_UP: 0.0[m
+[32m+[m[32m      };[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    this.completedCycles = Math.max(0, cycleNum - 1);[m
+[32m+[m
+[32m+[m[32m    // Instantaneous Electrical & Hydraulic Motor Power (kW)[m
+[32m+[m[32m    let instantaneousPowerKw = 0.0;[m
+[32m+[m[32m    if (packet.rawSensorsSnapshot?.EPS1 !== undefined) {[m
+[32m+[m[32m      // EPS1 from dataset replay is motor power in Watts[m
+[32m+[m[32m      instantaneousPowerKw = packet.rawSensorsSnapshot.EPS1 / 1000.0;[m
+[32m+[m[32m    } else if (packet.motorCurrentA !== undefined && packet.motorCurrentA > 0) {[m
+[32m+[m[32m      // 3-Phase electrical motor power formula: P = sqrt(3) * V * I * pf / 1000 (380V, pf=0.85)[m
+[32m+[m[32m      instantaneousPowerKw = (1.732 * 380.0 * 0.85 * packet.motorCurrentA) / 1000.0;[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m      // Hydraulic power P = (Pressure * Flow) / (600 * efficiency)[m
+[32m+[m[32m      const pumpEfficiency = 0.9;[m
+[32m+[m[32m      instantaneousPowerKw = (packet.pressureBar * packet.flowLmin) / (600.0 * pumpEfficiency);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    const dtSec = 0.1 * (packet.speedMultiplier || 1.0); // 100ms sample tick[m
+[32m+[m[32m    const dE_Wh = (instantaneousPowerKw * dtSec * 1000.0) / 3600.0;[m
+[32m+[m[32m    const dE_Kwh = dE_Wh / 1000.0;[m
+[32m+[m
+[32m+[m[32m    this.cumulativeEnergyKwh += dE_Kwh;[m
+[32m+[m[32m    this.currentCycleEnergyWh += dE_Wh;[m
+[32m+[m
+[32m+[m[32m    this.currentCycleSamples += 1;[m
+[32m+[m[32m    this.currentCyclePowerSumKw += instantaneousPowerKw;[m
+[32m+[m[32m    this.currentCyclePeakPowerKw = Math.max(this.currentCyclePeakPowerKw, instantaneousPowerKw);[m
+[32m+[m
+[32m+[m[32m    const phaseKey = packet.phase || 'FAST_DOWN';[m
+[32m+[m[32m    if (this.currentCyclePhaseEnergiesWh[phaseKey] !== undefined) {[m
+[32m+[m[32m      this.currentCyclePhaseEnergiesWh[phaseKey] += dE_Wh;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    // Attach computed real-time analytics estimates directly to telemetry packet[m
+[32m+[m[32m    packet.instantaneousPowerKw = parseFloat(instantaneousPowerKw.toFixed(2));[m
+[32m+[m[32m    packet.currentCycleEnergyWh = parseFloat(this.currentCycleEnergyWh.toFixed(2));[m
+[32m+[m[32m    packet.currentCycleEnergyKwh = parseFloat((this.currentCycleEnergyWh / 1000.0).toFixed(4));[m
+   }[m
+ [m
+   getStats() {[m
+     const count = this.buffer.length;[m
+[31m-    if (count === 0) {[m
+[31m-      return {[m
+[31m-        avgPressureBar: 0,[m
+[31m-        maxPressureBar: 0,[m
+[31m-        avgFlowLmin: 0,[m
+[31m-        maxFlowLmin: 0,[m
+[31m-        avgSpeedMmS: 0,[m
+[31m-        cycleTimeSec: 9.25,[m
+[31m-        completedCycles: 0,[m
+[31m-        estimatedEnergyKwh: 0,[m
+[31m-        label: 'Simulation Estimate'[m
+[31m-      };[m
+[31m-    }[m
+[32m+[m[32m    const currentBufAvgP = count === 0 ? 0 : this.buffer.reduce((acc, d) => acc + d.pressureBar, 0) / count;[m
+[32m+[m[32m    const currentBufAvgQ = count === 0 ? 0 : this.buffer.reduce((acc, d) => acc + d.flowLmin, 0) / count;[m
+[32m+[m[32m    const currentBufAvgV = count === 0 ? 0 : this.buffer.reduce((acc, d) => acc + d.speedMmS, 0) / count;[m
+[32m+[m
+[32m+[m[32m    const currentCycleAvgPowerKw = this.currentCycleSamples > 0[m[41m [m
+[32m+[m[32m      ? this.currentCyclePowerSumKw / this.currentCycleSamples[m[41m [m
+[32m+[m[32m      : 0;[m
+ [m
+[31m-    const currentBufAvgP = this.buffer.reduce((acc, d) => acc + d.pressureBar, 0) / count;[m
+[31m-    const currentBufAvgQ = this.buffer.reduce((acc, d) => acc + d.flowLmin, 0) / count;[m
+[31m-    const currentBufAvgV = this.buffer.reduce((acc, d) => acc + d.speedMmS, 0) / count;[m
+[32m+[m[32m    const avgEnergyWh = this.cycleEnergyHistory.length > 0[m
+[32m+[m[32m      ? this.avgEnergyPerCycleWh[m
+[32m+[m[32m      : (this.currentCycleEnergyWh > 0 ? this.currentCycleEnergyWh : 24.50);[m
+[32m+[m
+[32m+[m[32m    const lastInstantPower = count > 0 ? (this.buffer[count - 1].instantaneousPowerKw || 0) : 0;[m
+ [m
+     return {[m
+       avgPressureBar: parseFloat(currentBufAvgP.toFixed(1)),[m
+[36m@@ -86,10 +182,35 @@[m [mexport class PerformanceService {[m
+       avgSpeedMmS: parseFloat(currentBufAvgV.toFixed(1)),[m
+       cycleTimeSec: 9.25,[m
+       completedCycles: this.completedCycles,[m
+[31m-      estimatedEnergyKwh: parseFloat(this.cumulativeEnergyKwh.toFixed(4)),[m
+[32m+[m
+[32m+[m[32m      // --- ENERGY ANALYTICS MODULE METRICS (Analytics Estimates) ---[m
+[32m+[m[32m      currentCycleNumber: this.currentCycleNumber,[m
+[32m+[m[32m      currentCycleEnergyWh: parseFloat(this.currentCycleEnergyWh.toFixed(2)),[m
+[32m+[m[32m      currentCycleEnergyKwh: parseFloat((this.currentCycleEnergyWh / 1000.0).toFixed(4)),[m
+[32m+[m[41m      [m
+[32m+[m[32m      avgEnergyPerCycleWh: parseFloat(avgEnergyWh.toFixed(2)),[m
+[32m+[m[32m      avgEnergyPerCycleKwh: parseFloat((avgEnergyWh / 1000.0).toFixed(4)),[m
+[32m+[m[41m      [m
+[32m+[m[32m      totalCumulativeEnergyKwh: parseFloat(this.cumulativeEnergyKwh.toFixed(4)),[m
+[32m+[m[32m      estimatedEnergyKwh: parseFloat(this.cumulativeEnergyKwh.toFixed(4)), // backwards compatibility[m
+[32m+[m[41m      [m
+[32m+[m[32m      instantaneousPowerKw: parseFloat(lastInstantPower.toFixed(2)),[m
+[32m+[m[32m      currentCycleAvgPowerKw: parseFloat(currentCycleAvgPowerKw.toFixed(2)),[m
+[32m+[m[32m      currentCyclePeakPowerKw: parseFloat(this.currentCyclePeakPowerKw.toFixed(2)),[m
+[32m+[m[41m      [m
+[32m+[m[32m      currentCyclePhaseEnergiesWh: {[m
+[32m+[m[32m        FAST_DOWN: parseFloat(this.currentCyclePhaseEnergiesWh.FAST_DOWN.toFixed(2)),[m
+[32m+[m[32m        WORKING: parseFloat(this.currentCyclePhaseEnergiesWh.WORKING.toFixed(2)),[m
+[32m+[m[32m        HOLDING: parseFloat(this.currentCyclePhaseEnergiesWh.HOLDING.toFixed(2)),[m
+[32m+[m[32m        FAST_UP: parseFloat(this.currentCyclePhaseEnergiesWh.FAST_UP.toFixed(2))[m
+[32m+[m[32m      },[m
+[32m+[m[41m      [m
+[32m+[m[32m      cycleEnergyHistory: this.cycleEnergyHistory.slice(-50), // Last 50 cycles for Energy-vs-Cycle graph[m
+[32m+[m[41m      [m
+       systemLossBar: 10.0,[m
+       pumpEfficiency: 0.9,[m
+[31m-      label: 'Simulation Estimate'[m
+[32m+[m[32m      label: 'Analytics Estimate'[m
+     };[m
+   }[m
+ }[m
+[41m+[m
+[1mdiff --git a/backend/socket/socketHandler.js b/backend/socket/socketHandler.js[m
+[1mindex 4a17c7f..4451b0d 100644[m
+[1m--- a/backend/socket/socketHandler.js[m
+[1m+++ b/backend/socket/socketHandler.js[m
+[36m@@ -1,4 +1,4 @@[m
+[31m-export function setupSocketHandler(io, simulator, performanceService, analyticsService, datasetEngine, getMode, setMode) {[m
+[32m+[m[32mexport function setupSocketHandler(io, simulator, performanceService, analyticsService, datasetEngine, traceabilityService, optimizationService, getMode, setMode) {[m
+   let datasetReplayInterval = null;[m
+ [m
+   async function triggerMlPrediction(cycleNum) {[m
+[36m@@ -6,6 +6,16 @@[m [mexport function setupSocketHandler(io, simulator, performanceService, analyticsS[m
+     try {[m
+       const mlResult = await datasetEngine.runMlPredictionForCycle(cycleNum);[m
+       io.emit('ml_prediction', mlResult);[m
+[32m+[m
+[32m+[m[32m      if (traceabilityService) {[m
+[32m+[m[32m        traceabilityService.recordCycle({[m
+[32m+[m[32m          cycleNumber: cycleNum,[m
+[32m+[m[32m          stats: performanceService.getStats(),[m
+[32m+[m[32m          analytics: analyticsService.getAnalyticsReport(),[m
+[32m+[m[32m          mlPrediction: mlResult[m
+[32m+[m[32m        });[m
+[32m+[m[32m        io.emit('digital_records_update', traceabilityService.getRecords());[m
+[32m+[m[32m      }[m
+     } catch (err) {[m
+       console.error(`[SocketHandler] Error triggering ML prediction for cycle ${cycleNum}:`, err.message);[m
+     }[m
+[36m@@ -48,10 +58,24 @@[m [mexport function setupSocketHandler(io, simulator, performanceService, analyticsS[m
+     io.emit('performance_update', performanceService.getStats());[m
+     io.emit('analytics_update', analyticsService.getAnalyticsReport());[m
+ [m
+[31m-    // When a cycle completes (transitions back to FAST_DOWN), trigger ML prediction for next/current cycle[m
+[32m+[m[32m    if (optimizationService) {[m
+[32m+[m[32m      io.emit('optimization_update', optimizationService.generateOptimizationReport(performanceService.getStats()));[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    // When a cycle completes (transitions back to FAST_DOWN), trigger ML prediction and record digital cycle trace[m
+     if (event.phase === 'FAST_DOWN') {[m
+       const cycleToPredict = mode === 'DATASET_REPLAY' ? datasetEngine.currentCycleNumber : simulator.cycleNumber;[m
+       triggerMlPrediction(cycleToPredict);[m
+[32m+[m[41m      [m
+[32m+[m[32m      if (traceabilityService) {[m
+[32m+[m[32m        traceabilityService.recordCycle({[m
+[32m+[m[32m          cycleNumber: cycleToPredict,[m
+[32m+[m[32m          stats: performanceService.getStats(),[m
+[32m+[m[32m          analytics: analyticsService.getAnalyticsReport(),[m
+[32m+[m[32m          mlPrediction: datasetEngine?.lastMlPrediction[m
+[32m+[m[32m        });[m
+[32m+[m[32m        io.emit('digital_records_update', traceabilityService.getRecords());[m
+[32m+[m[32m      }[m
+     }[m
+   });[m
+ [m
+[36m@@ -78,6 +102,14 @@[m [mexport function setupSocketHandler(io, simulator, performanceService, analyticsS[m
+     socket.emit('performance_update', performanceService.getStats());[m
+     socket.emit('analytics_update', analyticsService.getAnalyticsReport());[m
+ [m
+[32m+[m[32m    if (optimizationService) {[m
+[32m+[m[32m      socket.emit('optimization_update', optimizationService.generateOptimizationReport(performanceService.getStats()));[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (traceabilityService) {[m
+[32m+[m[32m      socket.emit('digital_records_update', traceabilityService.getRecords());[m
+[32m+[m[32m    }[m
+[32m+[m
+     // Send last cached ML prediction on connect[m
+     if (datasetEngine && datasetEngine.lastMlPrediction) {[m
+       socket.emit('ml_prediction', datasetEngine.lastMlPrediction);[m
+[1mdiff --git a/frontend/src/components/Header.jsx b/frontend/src/components/Header.jsx[m
+[1mindex fe3c103..b09183c 100644[m
+[1m--- a/frontend/src/components/Header.jsx[m
+[1m+++ b/frontend/src/components/Header.jsx[m
+[36m@@ -8,7 +8,10 @@[m [mimport {[m
+   Database,[m
+   LayoutDashboard,[m
+   LineChart,[m
+[31m-  Cpu[m
+[32m+[m[32m  Cpu,[m
+[32m+[m[32m  Zap,[m
+[32m+[m[32m  FileCheck,[m
+[32m+[m[32m  Sliders[m
+ } from 'lucide-react';[m
+ [m
+ export function Header({[m
+[36m@@ -25,6 +28,9 @@[m [mexport function Header({[m
+   const navItems = [[m
+     { id: 'main', label: 'Main Dashboard', icon: LayoutDashboard },[m
+     { id: 'cycle', label: 'Cycle Analysis', icon: LineChart },[m
+[32m+[m[32m    { id: 'energy', label: 'Energy Analytics', icon: Zap },[m
+[32m+[m[32m    { id: 'optimization', label: 'Parameter Optimization', icon: Sliders },[m
+[32m+[m[32m    { id: 'traceability', label: 'Digital Traceability', icon: FileCheck },[m
+     { id: 'ml', label: 'ML Predictions', icon: Cpu }[m
+   ];[m
+ [m
+[1mdiff --git a/frontend/src/components/MainDashboardView.jsx b/frontend/src/components/MainDashboardView.jsx[m
+[1mindex cc525cf..c3f48c1 100644[m
+[1m--- a/frontend/src/components/MainDashboardView.jsx[m
+[1m+++ b/frontend/src/components/MainDashboardView.jsx[m
+[36m@@ -53,6 +53,7 @@[m [mexport function MainDashboardView({[m
+   systemStatus,[m
+   currentPacket,[m
+   chartHistory,[m
+[32m+[m[32m  performanceStats,[m
+   analyticsReport,[m
+   alerts,[m
+   isDatasetMode,[m
+[36m@@ -63,6 +64,11 @@[m [mexport function MainDashboardView({[m
+   const maintenanceIndicator = analyticsReport?.maintenanceIndicator || 'OPTIMAL / ROUTINE';[m
+   const diagnosticScore = analyticsReport?.confidenceScore ?? 98.5;[m
+ [m
+[32m+[m[32m  // Energy analytics estimates[m
+[32m+[m[32m  const currentCycleWh = performanceStats?.currentCycleEnergyWh ?? currentPacket?.currentCycleEnergyWh ?? 18.40;[m
+[32m+[m[32m  const avgEnergyWh = performanceStats?.avgEnergyPerCycleWh ?? 23.85;[m
+[32m+[m[32m  const totalEnergyKwh = performanceStats?.totalCumulativeEnergyKwh ?? performanceStats?.estimatedEnergyKwh ?? 1.4820;[m
+[32m+[m
+   // Key sensor values with fallbacks[m
+   const pressureVal = currentPacket?.pressureBar ?? 185.4;[m
+   const flowVal = currentPacket?.flowLmin ?? 42.1;[m
+[36m@@ -160,6 +166,53 @@[m [mexport function MainDashboardView({[m
+         </div>[m
+       </div>[m
+ [m
+[32m+[m[32m      {/* ENERGY ANALYTICS OVERVIEW CARD */}[m
+[32m+[m[32m      <div className="bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-xl p-5 shadow-xs font-mono">[m
+[32m+[m[32m        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">[m
+[32m+[m[32m          <div className="flex items-center gap-3">[m
+[32m+[m[32m            <div className="p-2.5 rounded-xl bg-white/20 backdrop-blur-xs text-white">[m
+[32m+[m[32m              <Zap className="w-6 h-6" />[m
+[32m+[m[32m            </div>[m
+[32m+[m[32m            <div>[m
+[32m+[m[32m              <div className="flex items-center gap-2">[m
+[32m+[m[32m                <h3 className="text-base font-black tracking-wider uppercase">[m
+[32m+[m[32m                  ENERGY ANALYTICS OVERVIEW[m
+[32m+[m[32m                </h3>[m
+[32m+[m[32m                <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-white/20 border border-white/30 text-white">[m
+[32m+[m[32m                  ANALYTICS ESTIMATE[m
+[32m+[m[32m                </span>[m
+[32m+[m[32m              </div>[m
+[32m+[m[32m              <p className="text-xs text-amber-100 font-medium mt-0.5">[m
+[32m+[m[32m                Real-Time Energy Metrics Calculated From Sensor Telemetry & Motor Power Output[m
+[32m+[m[32m              </p>[m
+[32m+[m[32m            </div>[m
+[32m+[m[32m          </div>[m
+[32m+[m
+[32m+[m[32m          <div className="grid grid-cols-3 gap-3 text-center text-xs">[m
+[32m+[m[32m            <div className="bg-white/10 p-2.5 rounded-lg border border-white/20">[m
+[32m+[m[32m              <span className="text-[10px] uppercase text-amber-200 block font-bold">Current Cycle Energy</span>[m
+[32m+[m[32m              <strong className="text-base lg:text-lg font-black block text-white mt-0.5">[m
+[32m+[m[32m                {currentCycleWh.toFixed(2)} Wh[m
+[32m+[m[32m              </strong>[m
+[32m+[m[32m            </div>[m
+[32m+[m
+[32m+[m[32m            <div className="bg-white/10 p-2.5 rounded-lg border border-white/20">[m
+[32m+[m[32m              <span className="text-[10px] uppercase text-amber-200 block font-bold">Avg Energy / Cycle</span>[m
+[32m+[m[32m              <strong className="text-base lg:text-lg font-black block text-white mt-0.5">[m
+[32m+[m[32m                {avgEnergyWh.toFixed(2)} Wh[m
+[32m+[m[32m              </strong>[m
+[32m+[m[32m            </div>[m
+[32m+[m
+[32m+[m[32m            <div className="bg-white/10 p-2.5 rounded-lg border border-white/20">[m
+[32m+[m[32m              <span className="text-[10px] uppercase text-amber-200 block font-bold">Total Energy</span>[m
+[32m+[m[32m              <strong className="text-base lg:text-lg font-black block text-white mt-0.5">[m
+[32m+[m[32m                {totalEnergyKwh.toFixed(4)} kWh[m
+[32m+[m[32m              </strong>[m
+[32m+[m[32m            </div>[m
+[32m+[m[32m          </div>[m
+[32m+[m[32m        </div>[m
+[32m+[m[32m      </div>[m
+[32m+[m
+       {/* 2. LIVE SENSOR OVERVIEW (4 MEDIUM/LARGE PARAMETER CARDS) */}[m
+       <div>[m
+         <div className="flex items-center justify-between mb-3">[m
+[1mdiff --git a/frontend/src/hooks/useRealtimeData.js b/frontend/src/hooks/useRealtimeData.js[m
+[1mindex e426d2e..3cf9711 100644[m
+[1m--- a/frontend/src/hooks/useRealtimeData.js[m
+[1m+++ b/frontend/src/hooks/useRealtimeData.js[m
+[36m@@ -20,6 +20,8 @@[m [mexport function useRealtimeData() {[m
+   const [performanceStats, setPerformanceStats] = useState(null);[m
+   const [analyticsReport, setAnalyticsReport] = useState(null);[m
+   const [mlPrediction, setMlPrediction] = useState(null);[m
+[32m+[m[32m  const [optimizationReport, setOptimizationReport] = useState(null);[m
+[32m+[m[32m  const [digitalRecords, setDigitalRecords] = useState([]);[m
+   const [alerts, setAlerts] = useState([]);[m
+   const [eventLog, setEventLog] = useState([]);[m
+ [m
+[36m@@ -100,6 +102,16 @@[m [mexport function useRealtimeData() {[m
+       setMlPrediction(data);[m
+     }[m
+ [m
+[32m+[m[32m    function onOptimizationUpdate(report) {[m
+[32m+[m[32m      setOptimizationReport(report);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    function onDigitalRecords(records) {[m
+[32m+[m[32m      if (Array.isArray(records)) {[m
+[32m+[m[32m        setDigitalRecords(records);[m
+[32m+[m[32m      }[m
+[32m+[m[32m    }[m
+[32m+[m
+     socket.on('connect', onConnect);[m
+     socket.on('disconnect', onDisconnect);[m
+     socket.on('system_status', onSystemStatus);[m
+[36m@@ -109,6 +121,8 @@[m [mexport function useRealtimeData() {[m
+     socket.on('performance_update', onPerformanceUpdate);[m
+     socket.on('analytics_update', onAnalyticsUpdate);[m
+     socket.on('ml_prediction', onMlPrediction);[m
+[32m+[m[32m    socket.on('optimization_update', onOptimizationUpdate);[m
+[32m+[m[32m    socket.on('digital_records_update', onDigitalRecords);[m
+ [m
+     return () => {[m
+       socket.off('connect', onConnect);[m
+[36m@@ -120,6 +134,8 @@[m [mexport function useRealtimeData() {[m
+       socket.off('performance_update', onPerformanceUpdate);[m
+       socket.off('analytics_update', onAnalyticsUpdate);[m
+       socket.off('ml_prediction', onMlPrediction);[m
+[32m+[m[32m      socket.off('optimization_update', onOptimizationUpdate);[m
+[32m+[m[32m      socket.off('digital_records_update', onDigitalRecords);[m
+     };[m
+   }, []);[m
+ [m
+[36m@@ -155,6 +171,8 @@[m [mexport function useRealtimeData() {[m
+     performanceStats,[m
+     analyticsReport,[m
+     mlPrediction,[m
+[32m+[m[32m    optimizationReport,[m
+[32m+[m[32m    digitalRecords,[m
+     alerts,[m
+     eventLog,[m
+     controls: {[m
+[1mdiff --git a/frontend/src/pages/Dashboard.jsx b/frontend/src/pages/Dashboard.jsx[m
+[1mindex d74d385..7551697 100644[m
+[1m--- a/frontend/src/pages/Dashboard.jsx[m
+[1m+++ b/frontend/src/pages/Dashboard.jsx[m
+[36m@@ -3,18 +3,24 @@[m [mimport { useRealtimeData } from '../hooks/useRealtimeData';[m
+ import { Header } from '../components/Header';[m
+ import { MainDashboardView } from '../components/MainDashboardView';[m
+ import { CycleAnalysisView } from '../components/CycleAnalysisView';[m
+[32m+[m[32mimport { EnergyAnalyticsView } from '../components/EnergyAnalyticsView';[m
+[32m+[m[32mimport { ParameterOptimizationView } from '../components/ParameterOptimizationView';[m
+[32m+[m[32mimport { DigitalTraceabilityView } from '../components/DigitalTraceabilityView';[m
+ import { MLPredictionsView } from '../components/MLPredictionsView';[m
+ [m
+ export function Dashboard() {[m
+[31m-  const [activeTab, setActiveTab] = useState('main'); // 'main' | 'cycle' | 'ml'[m
+[32m+[m[32m  const [activeTab, setActiveTab] = useState('main'); // 'main' | 'cycle' | 'energy' | 'optimization' | 'traceability' | 'ml'[m
+ [m
+   const {[m
+     connected,[m
+     systemStatus,[m
+     currentPacket,[m
+     chartHistory,[m
+[32m+[m[32m    performanceStats,[m
+     analyticsReport,[m
+     mlPrediction,[m
+[32m+[m[32m    optimizationReport,[m
+[32m+[m[32m    digitalRecords,[m
+     alerts,[m
+     controls[m
+   } = useRealtimeData();[m
+[36m@@ -44,6 +50,7 @@[m [mexport function Dashboard() {[m
+             systemStatus={systemStatus}[m
+             currentPacket={currentPacket}[m
+             chartHistory={chartHistory}[m
+[32m+[m[32m            performanceStats={performanceStats}[m
+             analyticsReport={analyticsReport}[m
+             alerts={alerts}[m
+             isDatasetMode={isDatasetMode}[m
+[36m@@ -62,7 +69,42 @@[m [mexport function Dashboard() {[m
+           />[m
+         )}[m
+ [m
+[31m-        {/* PAGE 3: ML COMPONENT PREDICTIONS */}[m
+[32m+[m[32m        {/* PAGE 3: ENERGY ANALYTICS MODULE */}[m
+[32m+[m[32m        {activeTab === 'energy' && ([m
+[32m+[m[32m          <EnergyAnalyticsView[m
+[32m+[m[32m            performanceStats={performanceStats}[m
+[32m+[m[32m            currentPacket={currentPacket}[m
+[32m+[m[32m            chartHistory={chartHistory}[m
+[32m+[m[32m            systemStatus={systemStatus}[m
+[32m+[m[32m            isDatasetMode={isDatasetMode}[m
+[32m+[m[32m            activeCycleNum={activeCycleNum}[m
+[32m+[m[32m          />[m
+[32m+[m[32m        )}[m
+[32m+[m
+[32m+[m[32m        {/* PAGE 4: PARAMETER OPTIMIZATION ANALYTICS */}[m
+[32m+[m[32m        {activeTab === 'optimization' && ([m
+[32m+[m[32m          <ParameterOptimizationView[m
+[32m+[m[32m            optimizationReport={optimizationReport}[m
+[32m+[m[32m            performanceStats={performanceStats}[m
+[32m+[m[32m            currentPacket={currentPacket}[m
+[32m+[m[32m            systemStatus={systemStatus}[m
+[32m+[m[32m            activeCycleNum={activeCycleNum}[m
+[32m+[m[32m          />[m
+[32m+[m[32m        )}[m
+[32m+[m
+[32m+[m[32m        {/* PAGE 5: DIGITAL RECORD & TRACEABILITY */}[m
+[32m+[m[32m        {activeTab === 'traceability' && ([m
+[32m+[m[32m          <DigitalTraceabilityView[m
+[32m+[m[32m            digitalRecords={digitalRecords}[m
+[32m+[m[32m            currentPacket={currentPacket}[m
+[32m+[m[32m            systemStatus={systemStatus}[m
+[32m+[m[32m            isDatasetMode={isDatasetMode}[m
+[32m+[m[32m            activeCycleNum={activeCycleNum}[m
+[32m+[m[32m            onSelectCycle={controls.selectDatasetCycle}[m
+[32m+[m[32m          />[m
+[32m+[m[32m        )}[m
+[32m+[m
+[32m+[m[32m        {/* PAGE 6: ML COMPONENT PREDICTIONS */}[m
+         {activeTab === 'ml' && ([m
+           <MLPredictionsView[m
+             mlPrediction={mlPrediction}[m
+[36m@@ -82,3 +124,5 @@[m [mexport function Dashboard() {[m
+     </div>[m
+   );[m
+ }[m
+[41m+[m
+[41m+[m

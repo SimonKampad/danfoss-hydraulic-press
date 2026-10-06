@@ -53,6 +53,7 @@ export function MainDashboardView({
   systemStatus,
   currentPacket,
   chartHistory,
+  performanceStats,
   analyticsReport,
   alerts,
   isDatasetMode,
@@ -62,6 +63,11 @@ export function MainDashboardView({
   const anomalyStatus = analyticsReport?.anomalyStatus || 'NO ANOMALY';
   const maintenanceIndicator = analyticsReport?.maintenanceIndicator || 'OPTIMAL / ROUTINE';
   const diagnosticScore = analyticsReport?.confidenceScore ?? 98.5;
+
+  // Energy analytics estimates
+  const currentCycleWh = performanceStats?.currentCycleEnergyWh ?? currentPacket?.currentCycleEnergyWh ?? 18.40;
+  const avgEnergyWh = performanceStats?.avgEnergyPerCycleWh ?? 23.85;
+  const totalEnergyKwh = performanceStats?.totalCumulativeEnergyKwh ?? performanceStats?.estimatedEnergyKwh ?? 1.4820;
 
   // Key sensor values with fallbacks
   const pressureVal = currentPacket?.pressureBar ?? 185.4;
@@ -157,6 +163,53 @@ export function MainDashboardView({
             </div>
           </div>
 
+        </div>
+      </div>
+
+      {/* ENERGY ANALYTICS OVERVIEW CARD */}
+      <div className="bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-xl p-5 shadow-xs font-mono">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-white/20 backdrop-blur-xs text-white">
+              <Zap className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-black tracking-wider uppercase">
+                  ENERGY ANALYTICS OVERVIEW
+                </h3>
+                <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-white/20 border border-white/30 text-white">
+                  ANALYTICS ESTIMATE
+                </span>
+              </div>
+              <p className="text-xs text-amber-100 font-medium mt-0.5">
+                Real-Time Energy Metrics Calculated From Sensor Telemetry & Motor Power Output
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 text-center text-xs">
+            <div className="bg-white/10 p-2.5 rounded-lg border border-white/20">
+              <span className="text-[10px] uppercase text-amber-200 block font-bold">Current Cycle Energy</span>
+              <strong className="text-base lg:text-lg font-black block text-white mt-0.5">
+                {currentCycleWh.toFixed(2)} Wh
+              </strong>
+            </div>
+
+            <div className="bg-white/10 p-2.5 rounded-lg border border-white/20">
+              <span className="text-[10px] uppercase text-amber-200 block font-bold">Avg Energy / Cycle</span>
+              <strong className="text-base lg:text-lg font-black block text-white mt-0.5">
+                {avgEnergyWh.toFixed(2)} Wh
+              </strong>
+            </div>
+
+            <div className="bg-white/10 p-2.5 rounded-lg border border-white/20">
+              <span className="text-[10px] uppercase text-amber-200 block font-bold">Total Energy</span>
+              <strong className="text-base lg:text-lg font-black block text-white mt-0.5">
+                {totalEnergyKwh.toFixed(4)} kWh
+              </strong>
+            </div>
+          </div>
         </div>
       </div>
 

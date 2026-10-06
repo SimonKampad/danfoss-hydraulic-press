@@ -1,4 +1,4 @@
-export function setupSocketHandler(io, simulator, performanceService, analyticsService, datasetEngine, getMode, setMode) {
+export function setupSocketHandler(io, simulator, performanceService, analyticsService, datasetEngine, traceabilityService, optimizationService, getMode, setMode) {
   let datasetReplayInterval = null;
 
   async function triggerMlPrediction(cycleNum) {
@@ -6,6 +6,16 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
     try {
       const mlResult = await datasetEngine.runMlPredictionForCycle(cycleNum);
       io.emit('ml_prediction', mlResult);
+
+      if (traceabilityService) {
+        traceabilityService.recordCycle({
+          cycleNumber: cycleNum,
+          stats: performanceService.getStats(),
+          analytics: analyticsService.getAnalyticsReport(),
+          mlPrediction: mlResult
+        });
+        io.emit('digital_records_update', traceabilityService.getRecords());
+      }
     } catch (err) {
       console.error(`[SocketHandler] Error triggering ML prediction for cycle ${cycleNum}:`, err.message);
     }
@@ -48,10 +58,24 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
     io.emit('performance_update', performanceService.getStats());
     io.emit('analytics_update', analyticsService.getAnalyticsReport());
 
-    // When a cycle completes (transitions back to FAST_DOWN), trigger ML prediction for next/current cycle
+    if (optimizationService) {
+      io.emit('optimization_update', optimizationService.generateOptimizationReport(performanceService.getStats()));
+    }
+
+    // When a cycle completes (transitions back to FAST_DOWN), trigger ML prediction and record digital cycle trace
     if (event.phase === 'FAST_DOWN') {
       const cycleToPredict = mode === 'DATASET_REPLAY' ? datasetEngine.currentCycleNumber : simulator.cycleNumber;
       triggerMlPrediction(cycleToPredict);
+      
+      if (traceabilityService) {
+        traceabilityService.recordCycle({
+          cycleNumber: cycleToPredict,
+          stats: performanceService.getStats(),
+          analytics: analyticsService.getAnalyticsReport(),
+          mlPrediction: datasetEngine?.lastMlPrediction
+        });
+        io.emit('digital_records_update', traceabilityService.getRecords());
+      }
     }
   });
 
@@ -77,6 +101,14 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
 
     socket.emit('performance_update', performanceService.getStats());
     socket.emit('analytics_update', analyticsService.getAnalyticsReport());
+
+    if (optimizationService) {
+      socket.emit('optimization_update', optimizationService.generateOptimizationReport(performanceService.getStats()));
+    }
+
+    if (traceabilityService) {
+      socket.emit('digital_records_update', traceabilityService.getRecords());
+    }
 
     // Send last cached ML prediction on connect
     if (datasetEngine && datasetEngine.lastMlPrediction) {

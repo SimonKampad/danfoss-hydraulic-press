@@ -20,6 +20,8 @@ export function useRealtimeData() {
   const [performanceStats, setPerformanceStats] = useState(null);
   const [analyticsReport, setAnalyticsReport] = useState(null);
   const [mlPrediction, setMlPrediction] = useState(null);
+  const [optimizationReport, setOptimizationReport] = useState(null);
+  const [digitalRecords, setDigitalRecords] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [eventLog, setEventLog] = useState([]);
 
@@ -100,6 +102,16 @@ export function useRealtimeData() {
       setMlPrediction(data);
     }
 
+    function onOptimizationUpdate(report) {
+      setOptimizationReport(report);
+    }
+
+    function onDigitalRecords(records) {
+      if (Array.isArray(records)) {
+        setDigitalRecords(records);
+      }
+    }
+
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('system_status', onSystemStatus);
@@ -109,6 +121,8 @@ export function useRealtimeData() {
     socket.on('performance_update', onPerformanceUpdate);
     socket.on('analytics_update', onAnalyticsUpdate);
     socket.on('ml_prediction', onMlPrediction);
+    socket.on('optimization_update', onOptimizationUpdate);
+    socket.on('digital_records_update', onDigitalRecords);
 
     return () => {
       socket.off('connect', onConnect);
@@ -120,6 +134,8 @@ export function useRealtimeData() {
       socket.off('performance_update', onPerformanceUpdate);
       socket.off('analytics_update', onAnalyticsUpdate);
       socket.off('ml_prediction', onMlPrediction);
+      socket.off('optimization_update', onOptimizationUpdate);
+      socket.off('digital_records_update', onDigitalRecords);
     };
   }, []);
 
@@ -155,6 +171,8 @@ export function useRealtimeData() {
     performanceStats,
     analyticsReport,
     mlPrediction,
+    optimizationReport,
+    digitalRecords,
     alerts,
     eventLog,
     controls: {
