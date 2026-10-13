@@ -55,6 +55,7 @@ export function Dashboard() {
             alerts={alerts}
             isDatasetMode={isDatasetMode}
             activeCycleNum={activeCycleNum}
+            controls={controls}
           />
         )}
 

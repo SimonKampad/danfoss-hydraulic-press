@@ -9,6 +9,7 @@ import { DatasetReplayEngine } from './services/datasetReplayEngine.js';
 import { TraceabilityService } from './services/traceabilityService.js';
 import { OptimizationService } from './services/optimizationService.js';
 import { setupSocketHandler } from './socket/socketHandler.js';
+import { getScenariosList, SCENARIOS } from './services/scenarioEngine.js';
 import { GROUP_2_SPECIFICATIONS, SIMULATION_THRESHOLDS, CYCLE_PHASES } from './config/pressConfig.js';
 
 const app = express();
@@ -31,7 +32,7 @@ const traceabilityService = new TraceabilityService();
 const optimizationService = new OptimizationService();
 
 // System mode state: 'SIMULATION' | 'DATASET_REPLAY'
-let systemMode = 'SIMULATION';
+let systemMode = 'DATASET_REPLAY';
 
 // Initialize Socket.IO Server
 const io = new Server(httpServer, {
@@ -45,6 +46,7 @@ setupSocketHandler(io, simulator, performanceService, analyticsService, datasetE
 
 // REST API Endpoints for Dashboard / External Integrations / Future Hardware
 app.get('/api/status', (req, res) => {
+  const activeScenario = SCENARIOS[datasetEngine.currentScenarioId] || SCENARIOS.NORMAL_OPERATION;
   res.json({
     system: 'Hydraulic Press Real-Time Monitoring System',
     vendor: 'Danfoss Assignment Concept',
@@ -55,8 +57,47 @@ app.get('/api/status', (req, res) => {
     cycleNumber: systemMode === 'DATASET_REPLAY' ? datasetEngine.currentCycleNumber : simulator.cycleNumber,
     currentPhase: simulator.currentPhaseKey,
     activeFault: simulator.activeFault,
-    uptimeSeconds: Math.round(simulator.totalElapsedTime)
+    uptimeSeconds: Math.round(simulator.totalElapsedTime),
+    scenarioId: activeScenario.id,
+    scenarioName: activeScenario.name,
+    dataSource: activeScenario.dataSource,
+    fastApiStatus: datasetEngine.fastApiStatus,
+    fastApiAvailable: datasetEngine.isFastApiAvailable,
+    fastApiUrl: datasetEngine.fastApiUrl
   });
+});
+
+app.get('/api/scenarios', (req, res) => {
+  res.json(getScenariosList());
+});
+
+app.post('/api/scenario/select', async (req, res) => {
+  const { scenarioId } = req.body;
+  const scenario = datasetEngine.setScenario(scenarioId);
+  
+  if (scenario.dataSource === 'REAL_FAULT_REPLAY' || scenario.dataSource === 'ORIGINAL_DATASET_REPLAY' || scenario.dataSource === 'SYNTHETIC_FAULT_SIMULATION') {
+    systemMode = 'DATASET_REPLAY';
+  }
+
+  const mlResult = await datasetEngine.runMlPredictionForCycle(datasetEngine.currentCycleNumber, scenario.id);
+  
+  io.emit('ml_prediction', mlResult);
+  io.emit('system_status', {
+    mode: systemMode,
+    dataMode: systemMode,
+    scenarioId: scenario.id,
+    scenarioName: scenario.name,
+    dataSource: scenario.dataSource,
+    cycleNumber: datasetEngine.currentCycleNumber,
+    status: simulator.status
+  });
+
+  res.json({ success: true, scenario, cycleNumber: datasetEngine.currentCycleNumber, mlResult });
+});
+
+app.get('/api/fastapi-status', async (req, res) => {
+  const health = await datasetEngine.checkFastApiHealth();
+  res.json(health);
 });
 
 app.get('/api/specifications', (req, res) => {
@@ -91,8 +132,9 @@ app.get('/api/traceability/record/:cycle', (req, res) => {
 
 app.get('/api/ml-prediction', async (req, res) => {
   const cycle = parseInt(req.query.cycle, 10) || datasetEngine.currentCycleNumber;
+  const scenarioId = req.query.scenarioId || datasetEngine.currentScenarioId;
   try {
-    const prediction = await datasetEngine.runMlPredictionForCycle(cycle);
+    const prediction = await datasetEngine.runMlPredictionForCycle(cycle, scenarioId);
     res.json(prediction);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -101,7 +143,7 @@ app.get('/api/ml-prediction', async (req, res) => {
 
 app.post('/api/dataset/select-cycle', async (req, res) => {
   const cycleNumber = parseInt(req.body.cycleNumber, 10) || 1;
-  datasetEngine.currentCycleNumber = Math.max(1, Math.min(2205, cycleNumber));
+  datasetEngine.currentCycleNumber = Math.max(1, Math.min(datasetEngine.maxCycles, cycleNumber));
   
   // Trigger ML prediction for the newly selected cycle
   const mlResult = await datasetEngine.runMlPredictionForCycle(datasetEngine.currentCycleNumber);
@@ -154,6 +196,8 @@ app.post('/api/control', (req, res) => {
   const { action, value } = req.body;
   if (action === 'start') simulator.start();
   else if (action === 'pause') simulator.pause();
+  else if (action === 'stop') simulator.stop();
+  else if (action === 'resume') simulator.resume();
   else if (action === 'reset') {
     simulator.clearDiagnosticOverride();
     simulator.reset();
@@ -182,4 +226,3 @@ httpServer.listen(PORT, () => {
   console.log(` Mode: SIMULATION / DATASET REPLAY Engine Active`);
   console.log(`=======================================================`);
 });
-

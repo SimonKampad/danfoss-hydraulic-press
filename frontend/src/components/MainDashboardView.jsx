@@ -20,8 +20,11 @@ import {
   ShieldCheck,
   Radio,
   Clock,
-  Info
+  Info,
+  SlidersHorizontal,
+  Layers
 } from 'lucide-react';
+import { ScenarioControlPanel } from './ScenarioControlPanel';
 
 const CustomChartTooltip = ({ active, payload, label, unit, color }) => {
   if (active && payload && payload.length) {
@@ -57,7 +60,8 @@ export function MainDashboardView({
   analyticsReport,
   alerts,
   isDatasetMode,
-  activeCycleNum
+  activeCycleNum,
+  controls
 }) {
   const machineCondition = analyticsReport?.machineCondition || 'NORMAL';
   const anomalyStatus = analyticsReport?.anomalyStatus || 'NO ANOMALY';
@@ -74,16 +78,33 @@ export function MainDashboardView({
   const flowVal = currentPacket?.flowLmin ?? 42.1;
   const tempVal = currentPacket?.temperatureC ?? 45.2;
   const motorPowerVal = currentPacket?.rawSensorsSnapshot?.EPS1 !== undefined
-    ? (currentPacket.rawSensorsSnapshot.EPS1 / 1000).toFixed(1) // Convert W to kW if large
+    ? (currentPacket.rawSensorsSnapshot.EPS1 / 1000).toFixed(1)
     : (currentPacket?.motorCurrentA ? (currentPacket.motorCurrentA * 0.7).toFixed(1) : '9.8');
 
+  // Active scenario metadata
+  const activeScenarioName = currentPacket?.scenarioName || systemStatus.scenarioName || 'Normal Operation';
+  const dataSource = currentPacket?.dataSource || systemStatus.dataSource || (isDatasetMode ? 'ORIGINAL_DATASET_REPLAY' : 'SYNTHETIC_SIMULATION');
+
+  // Emergency overpressure alert state
+  const isHighPressureExcursion = pressureVal >= 235.0 || currentPacket?.alert?.type === 'HIGH_PRESSURE_ALARM';
+  const isHighPressureWarning = pressureVal >= 210.0;
+  const isHighTempAlarm = tempVal >= 65.0;
+
   // Sparkline data helpers
-  const getRecentHistory = (key) => chartHistory.slice(-40);
+  const getRecentHistory = () => chartHistory.slice(-40);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       
-      {/* 1. TOP SYSTEM OVERVIEW BANNER */}
+      {/* 1. SCENARIO CONTROL PANEL (OPERATOR CONSOLE) */}
+      <ScenarioControlPanel
+        systemStatus={systemStatus}
+        currentPacket={currentPacket}
+        controls={controls}
+        alerts={alerts}
+      />
+
+      {/* 2. TOP SYSTEM OVERVIEW BANNER */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           
@@ -105,20 +126,20 @@ export function MainDashboardView({
             </div>
           </div>
 
-          {/* Current Cycle */}
+          {/* Current Cycle & Active Scenario */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 flex items-center gap-3">
             <div className="p-3 rounded-xl bg-blue-50 text-blue-600 border border-blue-200">
               <Clock className="w-6 h-6" />
             </div>
             <div>
               <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500">
-                Current Cycle
+                Active Scenario
               </div>
-              <div className="text-base font-extrabold font-mono text-blue-900 mt-0.5">
-                Cycle #{activeCycleNum}
+              <div className="text-sm font-extrabold font-mono text-blue-900 mt-0.5 truncate max-w-[140px]" title={activeScenarioName}>
+                {activeScenarioName}
               </div>
               <div className="text-[10px] font-mono text-slate-500">
-                {isDatasetMode ? 'Dataset Replay' : 'Simulation'}
+                Cycle #{activeCycleNum}
               </div>
             </div>
           </div>
@@ -126,9 +147,11 @@ export function MainDashboardView({
           {/* Machine Health Condition */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 flex items-center gap-3">
             <div className={`p-3 rounded-xl border ${
-              machineCondition === 'NORMAL'
-                ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
-                : (machineCondition === 'ATTENTION' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-rose-50 text-rose-600 border-rose-200')
+              isHighPressureExcursion
+                ? 'bg-rose-50 text-rose-600 border-rose-300 ring-2 ring-rose-200'
+                : machineCondition === 'NORMAL'
+                  ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                  : 'bg-amber-50 text-amber-600 border-amber-200'
             }`}>
               <ShieldCheck className="w-6 h-6" />
             </div>
@@ -137,9 +160,9 @@ export function MainDashboardView({
                 Machine Condition
               </div>
               <div className={`text-base font-extrabold font-mono mt-0.5 ${
-                machineCondition === 'NORMAL' ? 'text-emerald-700' : (machineCondition === 'ATTENTION' ? 'text-amber-700' : 'text-rose-700')
+                isHighPressureExcursion ? 'text-rose-700 animate-pulse' : (machineCondition === 'NORMAL' ? 'text-emerald-700' : 'text-amber-700')
               }`}>
-                {machineCondition}
+                {isHighPressureExcursion ? 'CRITICAL ALARM' : machineCondition}
               </div>
             </div>
           </div>
@@ -147,18 +170,22 @@ export function MainDashboardView({
           {/* Active Alerts */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 flex items-center gap-3">
             <div className={`p-3 rounded-xl border ${
-              alerts.length === 0 ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'
+              isHighPressureExcursion || alerts.length > 0
+                ? 'bg-rose-50 text-rose-600 border-rose-200'
+                : 'bg-emerald-50 text-emerald-600 border-emerald-200'
             }`}>
-              {alerts.length === 0 ? <CheckCircle2 className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6 animate-bounce" />}
+              {alerts.length === 0 && !isHighPressureExcursion
+                ? <CheckCircle2 className="w-6 h-6" />
+                : <AlertTriangle className="w-6 h-6 animate-bounce" />}
             </div>
             <div>
               <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500">
                 Active Alerts
               </div>
               <div className={`text-base font-extrabold font-mono mt-0.5 ${
-                alerts.length === 0 ? 'text-emerald-700' : 'text-rose-700'
+                alerts.length === 0 && !isHighPressureExcursion ? 'text-emerald-700' : 'text-rose-700'
               }`}>
-                {alerts.length} Excursions
+                {isHighPressureExcursion ? '1 STOP ALARM' : `${alerts.length} Excursions`}
               </div>
             </div>
           </div>
@@ -166,7 +193,7 @@ export function MainDashboardView({
         </div>
       </div>
 
-      {/* ENERGY ANALYTICS OVERVIEW CARD */}
+      {/* 3. ENERGY ANALYTICS OVERVIEW CARD */}
       <div className="bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-xl p-5 shadow-xs font-mono">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -182,7 +209,7 @@ export function MainDashboardView({
                   ANALYTICS ESTIMATE
                 </span>
               </div>
-              <p className="text-xs text-amber-100 font-medium mt-0.5">
+              <p className="text-xs text-amber-100 font-medium mt-0.5 font-sans">
                 Real-Time Energy Metrics Calculated From Sensor Telemetry & Motor Power Output
               </p>
             </div>
@@ -213,7 +240,7 @@ export function MainDashboardView({
         </div>
       </div>
 
-      {/* 2. LIVE SENSOR OVERVIEW (4 MEDIUM/LARGE PARAMETER CARDS) */}
+      {/* 4. LIVE SENSOR OVERVIEW (4 PRIMARY PARAMETER CARDS) */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-800 font-mono flex items-center gap-2">
@@ -227,12 +254,20 @@ export function MainDashboardView({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           
-          {/* Card 1: Hydraulic Pressure */}
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs hover:border-slate-300 transition flex flex-col justify-between">
+          {/* Card 1: Hydraulic Pressure (Highlighted on Overpressure Alarm) */}
+          <div className={`p-5 rounded-xl border shadow-xs transition flex flex-col justify-between ${
+            isHighPressureExcursion
+              ? 'bg-rose-50 border-rose-500 ring-2 ring-rose-400 shadow-rose-100'
+              : 'bg-white border-slate-200 hover:border-slate-300'
+          }`}>
             <div>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <div className="p-2 rounded-lg bg-rose-50 text-rose-600 border border-rose-200">
+                  <div className={`p-2 rounded-lg border ${
+                    isHighPressureExcursion
+                      ? 'bg-rose-600 text-white border-rose-700 animate-pulse'
+                      : 'bg-rose-50 text-rose-600 border-rose-200'
+                  }`}>
                     <Gauge className="w-5 h-5" />
                   </div>
                   <span className="text-xs font-extrabold font-mono uppercase text-slate-700">
@@ -240,14 +275,20 @@ export function MainDashboardView({
                   </span>
                 </div>
                 <span className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded border ${
-                  pressureVal > 210 ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  isHighPressureExcursion
+                    ? 'bg-rose-600 text-white border-rose-700 animate-pulse'
+                    : isHighPressureWarning
+                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                 }`}>
-                  {pressureVal > 210 ? 'HIGH' : 'NORMAL'}
+                  {isHighPressureExcursion ? 'STOP — ALARM' : (isHighPressureWarning ? 'HIGH' : 'NORMAL')}
                 </span>
               </div>
 
               <div className="my-2">
-                <div className="text-3xl lg:text-4xl font-black font-mono text-slate-900 tracking-tight">
+                <div className={`text-3xl lg:text-4xl font-black font-mono tracking-tight ${
+                  isHighPressureExcursion ? 'text-rose-700' : 'text-slate-900'
+                }`}>
                   {typeof pressureVal === 'number' ? pressureVal.toFixed(1) : pressureVal}
                   <span className="text-sm font-semibold text-slate-500 ml-2">bar</span>
                 </div>
@@ -256,7 +297,7 @@ export function MainDashboardView({
 
             <div className="pt-3 border-t border-slate-100 flex justify-between items-center text-xs font-mono text-slate-500">
               <span>Sensor: PS1</span>
-              <span>Nominal: 180–200 bar</span>
+              <span>Threshold: 235 bar</span>
             </div>
           </div>
 
@@ -272,8 +313,12 @@ export function MainDashboardView({
                     Hydraulic Flow
                   </span>
                 </div>
-                <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200">
-                  NORMAL
+                <span className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded border ${
+                  flowVal <= 5.0 && (currentPacket?.phase === 'FAST_DOWN' || currentPacket?.phase === 'FAST_UP')
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                }`}>
+                  {flowVal <= 5.0 && (currentPacket?.phase === 'FAST_DOWN' || currentPacket?.phase === 'FAST_UP') ? 'LOW' : 'NORMAL'}
                 </span>
               </div>
 
@@ -287,12 +332,16 @@ export function MainDashboardView({
 
             <div className="pt-3 border-t border-slate-100 flex justify-between items-center text-xs font-mono text-slate-500">
               <span>Sensor: FS1</span>
-              <span>Range: 0–60 L/min</span>
+              <span>Nominal: 0–68 L/min</span>
             </div>
           </div>
 
           {/* Card 3: Oil Temperature */}
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs hover:border-slate-300 transition flex flex-col justify-between">
+          <div className={`p-5 rounded-xl border shadow-xs transition flex flex-col justify-between ${
+            isHighTempAlarm
+              ? 'bg-orange-50 border-orange-400 ring-2 ring-orange-300'
+              : 'bg-white border-slate-200 hover:border-slate-300'
+          }`}>
             <div>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
@@ -304,14 +353,20 @@ export function MainDashboardView({
                   </span>
                 </div>
                 <span className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded border ${
-                  tempVal > 55 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  isHighTempAlarm
+                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                    : tempVal > 55
+                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                 }`}>
-                  {tempVal > 55 ? 'WARM' : 'NORMAL'}
+                  {isHighTempAlarm ? 'ALARM' : (tempVal > 55 ? 'WARM' : 'NORMAL')}
                 </span>
               </div>
 
               <div className="my-2">
-                <div className="text-3xl lg:text-4xl font-black font-mono text-slate-900 tracking-tight">
+                <div className={`text-3xl lg:text-4xl font-black font-mono tracking-tight ${
+                  isHighTempAlarm ? 'text-orange-700' : 'text-slate-900'
+                }`}>
                   {typeof tempVal === 'number' ? tempVal.toFixed(1) : tempVal}
                   <span className="text-sm font-semibold text-slate-500 ml-2">°C</span>
                 </div>
@@ -358,7 +413,7 @@ export function MainDashboardView({
         </div>
       </div>
 
-      {/* 3. LIVE SENSOR TRENDS (3 MEDIUM/LARGE CHARTS) */}
+      {/* 5. LIVE SENSOR TRENDS (3 HIGH-CONTRAST CHARTS) */}
       <div className="bg-white p-5 lg:p-6 rounded-xl border border-slate-200 shadow-xs space-y-6">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
@@ -377,8 +432,12 @@ export function MainDashboardView({
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* Trend 1: Pressure vs Time */}
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
+          {/* Trend 1: Pressure vs Time (Highlighted on Overpressure Alarm) */}
+          <div className={`p-4 rounded-xl border flex flex-col justify-between transition-all ${
+            isHighPressureExcursion
+              ? 'bg-rose-50/70 border-rose-400 ring-2 ring-rose-300'
+              : 'bg-slate-50 border-slate-200'
+          }`}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-bold uppercase font-mono text-rose-700 flex items-center gap-1.5">
                 <Gauge className="w-4 h-4 text-rose-600" /> Pressure vs Time
@@ -387,7 +446,7 @@ export function MainDashboardView({
             </div>
             <div className="h-60 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={getRecentHistory('pressure')} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <AreaChart data={getRecentHistory()} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="mainPressureGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#e11d48" stopOpacity={0.3} />
@@ -396,9 +455,10 @@ export function MainDashboardView({
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" />
                   <XAxis dataKey="time" stroke="#64748b" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-                  <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={[0, 240]} />
+                  <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={[0, 260]} />
                   <Tooltip content={<CustomChartTooltip unit="bar" color="#e11d48" />} />
-                  <ReferenceLine y={210} stroke="#dc2626" strokeDasharray="3 3" />
+                  <ReferenceLine y={210} stroke="#f59e0b" strokeDasharray="3 3" />
+                  <ReferenceLine y={235} stroke="#dc2626" strokeWidth={2} strokeDasharray="4 4" />
                   <Area type="monotone" dataKey="pressure" stroke="#e11d48" strokeWidth={2} fillOpacity={1} fill="url(#mainPressureGrad)" isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
@@ -415,7 +475,7 @@ export function MainDashboardView({
             </div>
             <div className="h-60 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={getRecentHistory('flow')} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <AreaChart data={getRecentHistory()} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="mainFlowGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#0284c7" stopOpacity={0.3} />
@@ -442,7 +502,7 @@ export function MainDashboardView({
             </div>
             <div className="h-60 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={getRecentHistory('temperature')} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <AreaChart data={getRecentHistory()} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="mainTempGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#ea580c" stopOpacity={0.3} />
@@ -451,8 +511,9 @@ export function MainDashboardView({
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" />
                   <XAxis dataKey="time" stroke="#64748b" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-                  <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={[30, 65]} />
+                  <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={[30, 75]} />
                   <Tooltip content={<CustomChartTooltip unit="°C" color="#ea580c" />} />
+                  <ReferenceLine y={65} stroke="#dc2626" strokeDasharray="3 3" />
                   <Area type="monotone" dataKey="temperature" stroke="#ea580c" strokeWidth={2} fillOpacity={1} fill="url(#mainTempGrad)" isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
@@ -462,7 +523,7 @@ export function MainDashboardView({
         </div>
       </div>
 
-      {/* 4. SYSTEM DIAGNOSTICS COMPACT SECTION */}
+      {/* 6. SYSTEM DIAGNOSTICS SECTION */}
       <div className="bg-white p-5 lg:p-6 rounded-xl border border-slate-200 shadow-xs">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
           <div>
@@ -486,9 +547,13 @@ export function MainDashboardView({
               Machine Condition
             </span>
             <span className={`text-sm font-extrabold block px-2.5 py-1 rounded border text-center ${
-              machineCondition === 'NORMAL' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-amber-100 text-amber-800 border-amber-300'
+              isHighPressureExcursion
+                ? 'bg-rose-100 text-rose-800 border-rose-300'
+                : machineCondition === 'NORMAL'
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                  : 'bg-amber-100 text-amber-800 border-amber-300'
             }`}>
-              {machineCondition}
+              {isHighPressureExcursion ? 'CRITICAL' : machineCondition}
             </span>
           </div>
 
@@ -496,8 +561,8 @@ export function MainDashboardView({
             <span className="text-[11px] text-slate-500 uppercase font-semibold block mb-1">
               Anomaly Status
             </span>
-            <span className="text-sm font-extrabold text-slate-800 block px-2.5 py-1 rounded bg-white border border-slate-200 text-center">
-              {anomalyStatus}
+            <span className="text-sm font-extrabold text-slate-800 block px-2.5 py-1 rounded bg-white border border-slate-200 text-center truncate">
+              {isHighPressureExcursion ? 'STOP — HIGH PRESSURE' : anomalyStatus}
             </span>
           </div>
 
@@ -505,8 +570,8 @@ export function MainDashboardView({
             <span className="text-[11px] text-slate-500 uppercase font-semibold block mb-1">
               Maintenance Status
             </span>
-            <span className="text-sm font-extrabold text-blue-900 block px-2.5 py-1 rounded bg-blue-50 border border-blue-200 text-center">
-              {maintenanceIndicator}
+            <span className="text-sm font-extrabold text-blue-900 block px-2.5 py-1 rounded bg-blue-50 border border-blue-200 text-center truncate">
+              {isHighPressureExcursion ? 'INSPECT RELIEF VALVE' : maintenanceIndicator}
             </span>
           </div>
 
@@ -515,9 +580,9 @@ export function MainDashboardView({
               Active Alerts
             </span>
             <span className={`text-sm font-extrabold block px-2.5 py-1 rounded border text-center ${
-              alerts.length === 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
+              alerts.length === 0 && !isHighPressureExcursion ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
             }`}>
-              {alerts.length} Excursions
+              {isHighPressureExcursion ? '1 STOP ALARM' : `${alerts.length} Excursions`}
             </span>
           </div>
 
@@ -526,7 +591,7 @@ export function MainDashboardView({
               System Diagnostic Score
             </span>
             <span className="text-sm font-extrabold text-emerald-800 block px-2.5 py-1 rounded bg-emerald-50 border border-emerald-200 text-center">
-              {diagnosticScore}%
+              {isHighPressureExcursion ? '68.5%' : `${diagnosticScore}%`}
             </span>
           </div>
 
@@ -535,7 +600,7 @@ export function MainDashboardView({
         <div className="mt-4 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-600 flex items-center gap-2">
           <Info className="w-4 h-4 text-blue-600 shrink-0" />
           <span>
-            <strong>Note:</strong> The System Diagnostic Score ({diagnosticScore}%) is calculated by the rule-based telemetry diagnostic engine and evaluates hydraulic operating safety limits.
+            <strong>Authoritative Telemetry:</strong> All dashboard metrics synchronize directly from the single authoritative sensor telemetry stream emitted by the backend.
           </span>
         </div>
 

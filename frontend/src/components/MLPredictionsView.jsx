@@ -87,16 +87,21 @@ export function MLPredictionsView({ mlPrediction, isDatasetMode, activeCycleNum 
           </div>
         </div>
 
-        {/* FastAPI Status Badge (ONCE IN HEADER) */}
-        <div className="flex items-center gap-2 font-mono text-xs">
+        {/* FastAPI Status Badge & Scenario Provenance (ONCE IN HEADER) */}
+        <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
           <div className={`px-3.5 py-1.5 rounded-lg border flex items-center gap-2 font-bold ${
             isOnline
               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
               : 'bg-rose-50 text-rose-700 border-rose-200'
           }`}>
-            <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+            <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse'}`} />
             FastAPI: {isOnline ? 'CONNECTED (Port 8000)' : 'UNAVAILABLE'}
           </div>
+
+          <span className="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-900 border border-indigo-200 font-bold flex items-center gap-1.5">
+            <span className="text-indigo-500 font-normal">Scenario:</span>
+            {mlPrediction?.scenarioName || 'Active Scenario'}
+          </span>
 
           {isDatasetMode && (
             <span className="px-3.5 py-1.5 rounded-lg bg-blue-50 text-blue-800 border border-blue-200 font-bold flex items-center gap-1.5">
@@ -106,6 +111,28 @@ export function MLPredictionsView({ mlPrediction, isDatasetMode, activeCycleNum 
           )}
         </div>
       </div>
+
+      {/* FASTAPI OFFLINE ALERT BANNER (IF UNAVAILABLE) */}
+      {!isOnline && (
+        <div className="bg-amber-50 border-2 border-amber-300 p-4 rounded-xl font-mono text-xs text-amber-900 flex flex-col sm:flex-row items-start gap-3 shadow-xs">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <div className="font-bold text-sm text-amber-950 flex items-center gap-2">
+              <span>FastAPI Inference Service Unavailable</span>
+              <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded font-bold uppercase">
+                Sensor Telemetry Operating Normally
+              </span>
+            </div>
+            <p className="text-xs text-amber-800 font-sans leading-relaxed">
+              Real-time physical telemetry and software safety alerts continue streaming without disruption. To activate machine learning inference:
+            </p>
+            <ul className="list-disc list-inside text-[11px] text-amber-900 font-mono space-y-0.5 pt-1">
+              <li><strong>In Production (Render):</strong> Ensure the Python FastAPI web service is deployed and set <code className="bg-amber-100 px-1 py-0.5 rounded">FASTAPI_URL=https://&lt;your-fastapi-service&gt;.onrender.com</code> in the Node backend environment variables.</li>
+              <li><strong>In Local Development:</strong> Start FastAPI with <code className="bg-amber-100 px-1 py-0.5 rounded">python -m uvicorn api.app:app --host 127.0.0.1 --port 8000</code> from the backend folder.</li>
+            </ul>
+          </div>
+        </div>
+      )}
 
       {/* 2. MODEL PIPELINE INFORMATION BANNER (ONCE AT TOP) */}
       <div className="bg-indigo-900 text-white p-5 lg:p-6 rounded-xl border border-indigo-800 shadow-md font-mono">

@@ -1,10 +1,11 @@
-export function setupSocketHandler(io, simulator, performanceService, analyticsService, datasetEngine, traceabilityService, optimizationService, getMode, setMode) {
-  let datasetReplayInterval = null;
+import { SCENARIOS } from '../services/scenarioEngine.js';
 
-  async function triggerMlPrediction(cycleNum) {
+export function setupSocketHandler(io, simulator, performanceService, analyticsService, datasetEngine, traceabilityService, optimizationService, getMode, setMode) {
+  
+  async function triggerMlPrediction(cycleNum, scenarioId = datasetEngine?.currentScenarioId) {
     if (!datasetEngine) return;
     try {
-      const mlResult = await datasetEngine.runMlPredictionForCycle(cycleNum);
+      const mlResult = await datasetEngine.runMlPredictionForCycle(cycleNum, scenarioId);
       io.emit('ml_prediction', mlResult);
 
       if (traceabilityService) {
@@ -21,33 +22,75 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
     }
   }
 
-  // Initial trigger for cycle 1
+  // Initial trigger on server startup
   triggerMlPrediction(1);
+
+  // Background FastAPI Health Check Polling (Every 15s)
+  // This automatically recovers status to ONLINE when Render FastAPI wakes up from inactivity
+  setInterval(async () => {
+    if (datasetEngine) {
+      const prevAvailable = datasetEngine.isFastApiAvailable;
+      const health = await datasetEngine.checkFastApiHealth(3000);
+      
+      // If FastAPI just recovered from offline, broadcast update and run prediction
+      if (health.available && !prevAvailable) {
+        console.log(`[SocketHandler] FastAPI service detected ONLINE at ${health.url} (${health.latencyMs}ms). Triggering ML update.`);
+        io.emit('system_status', {
+          fastApiStatus: 'ONLINE',
+          fastApiAvailable: true,
+          modelsLoaded: health.modelsLoaded
+        });
+        const activeCycle = getMode() === 'DATASET_REPLAY' ? datasetEngine.currentCycleNumber : simulator.cycleNumber;
+        triggerMlPrediction(activeCycle);
+      }
+    }
+  }, 15000);
 
   // Simulator event subscriptions
   simulator.onData(async (sensorPacket) => {
     const mode = getMode ? getMode() : 'SIMULATION';
-    
+    const activeScenarioId = datasetEngine?.currentScenarioId || 'NORMAL_OPERATION';
+    const activeScenario = SCENARIOS[activeScenarioId] || SCENARIOS.NORMAL_OPERATION;
+
     if (mode === 'SIMULATION') {
-      performanceService.recordData(sensorPacket);
-      analyticsService.processSample(sensorPacket);
-      io.emit('sensor_data', sensorPacket);
+      const enhancedPacket = {
+        ...sensorPacket,
+        scenarioId: activeScenario.id,
+        scenarioName: activeScenario.name,
+        dataSource: 'SYNTHETIC_SIMULATION'
+      };
+
+      performanceService.recordData(enhancedPacket);
+      analyticsService.processSample(enhancedPacket);
+      io.emit('sensor_data', enhancedPacket);
     } else if (mode === 'DATASET_REPLAY') {
-      // In dataset replay mode, generate realistic packet from raw sensor arrays
       try {
         const cycleNum = datasetEngine.currentCycleNumber;
         const rawSensors = await datasetEngine.loadCycleRawSensors(cycleNum);
         
         const totalCycleDuration = 9.25; // seconds
         const progressRatio = (simulator.cycleElapsedTime % totalCycleDuration) / totalCycleDuration;
-        const frame = datasetEngine.generateTelemetryFrame(rawSensors, cycleNum, progressRatio, simulator.totalElapsedTime);
+        const frame = datasetEngine.generateTelemetryFrame(rawSensors, cycleNum, progressRatio, simulator.totalElapsedTime, activeScenarioId);
         
         performanceService.recordData(frame);
         analyticsService.processSample(frame);
+        
+        // Single authoritative telemetry emission for all frontend consumers
         io.emit('sensor_data', frame);
+
+        // If an immediate alert was triggered in frame, broadcast alert_event
+        if (frame.alert) {
+          io.emit('alert_event', frame.alert);
+        }
       } catch (err) {
-        // Fallback to simulator packet if dataset file issue
-        io.emit('sensor_data', { ...sensorPacket, dataMode: 'DATASET_REPLAY' });
+        // Safe fallback if raw dataset read hiccup
+        io.emit('sensor_data', {
+          ...sensorPacket,
+          dataMode: 'DATASET_REPLAY',
+          scenarioId: activeScenario.id,
+          scenarioName: activeScenario.name,
+          dataSource: activeScenario.dataSource
+        });
       }
     }
   });
@@ -88,6 +131,8 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
     console.log(`[Socket.IO] Client connected: ${socket.id}`);
 
     const mode = getMode ? getMode() : 'SIMULATION';
+    const activeScenarioId = datasetEngine?.currentScenarioId || 'NORMAL_OPERATION';
+    const activeScenario = SCENARIOS[activeScenarioId] || SCENARIOS.NORMAL_OPERATION;
 
     // Send initial snapshot
     socket.emit('system_status', {
@@ -96,7 +141,12 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
       mode: mode,
       dataMode: mode,
       cycleNumber: mode === 'DATASET_REPLAY' ? datasetEngine.currentCycleNumber : simulator.cycleNumber,
-      activeFault: simulator.activeFault
+      activeFault: simulator.activeFault,
+      scenarioId: activeScenario.id,
+      scenarioName: activeScenario.name,
+      dataSource: activeScenario.dataSource,
+      fastApiStatus: datasetEngine?.fastApiStatus || 'UNKNOWN',
+      fastApiAvailable: datasetEngine?.isFastApiAvailable || false
     });
 
     socket.emit('performance_update', performanceService.getStats());
@@ -117,24 +167,80 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
       triggerMlPrediction(1);
     }
 
-    // Controls from client UI
+    // --- CLIENT UI CONTROLS ---
+
     socket.on('simulation:start', () => {
       simulator.start();
-      io.emit('system_status', { status: simulator.status, speedMultiplier: simulator.speedMultiplier, mode: getMode() });
+      io.emit('system_status', {
+        status: simulator.status,
+        speedMultiplier: simulator.speedMultiplier,
+        mode: getMode()
+      });
     });
 
     socket.on('simulation:pause', () => {
       simulator.pause();
-      io.emit('system_status', { status: simulator.status, speedMultiplier: simulator.speedMultiplier, mode: getMode() });
+      io.emit('system_status', {
+        status: simulator.status,
+        speedMultiplier: simulator.speedMultiplier,
+        mode: getMode()
+      });
+    });
+
+    socket.on('simulation:stop', () => {
+      simulator.stop();
+      console.log(`[SocketHandler] Simulation stopped by operator control.`);
+      io.emit('system_status', {
+        status: 'STOPPED',
+        speedMultiplier: simulator.speedMultiplier,
+        mode: getMode()
+      });
+    });
+
+    socket.on('simulation:resume', () => {
+      simulator.resume();
+      console.log(`[SocketHandler] Simulation resumed.`);
+      io.emit('system_status', {
+        status: simulator.status,
+        speedMultiplier: simulator.speedMultiplier,
+        mode: getMode()
+      });
     });
 
     socket.on('simulation:reset', () => {
       simulator.reset();
       performanceService.reset();
-      io.emit('system_status', { status: simulator.status, speedMultiplier: simulator.speedMultiplier, mode: getMode() });
+      io.emit('system_status', {
+        status: simulator.status,
+        speedMultiplier: simulator.speedMultiplier,
+        mode: getMode()
+      });
       io.emit('performance_update', performanceService.getStats());
       io.emit('analytics_update', analyticsService.getAnalyticsReport());
       triggerMlPrediction(getMode() === 'DATASET_REPLAY' ? datasetEngine.currentCycleNumber : 1);
+    });
+
+    socket.on('scenario:select', async (scenarioId) => {
+      const selected = datasetEngine.setScenario(scenarioId);
+      console.log(`[SocketHandler] Operator selected scenario: ${selected.name}`);
+
+      // Auto-switch mode to DATASET_REPLAY if component fault or normal replay
+      if (setMode && (selected.dataSource === 'REAL_FAULT_REPLAY' || selected.dataSource === 'ORIGINAL_DATASET_REPLAY' || selected.dataSource === 'SYNTHETIC_FAULT_SIMULATION')) {
+        setMode('DATASET_REPLAY');
+      }
+
+      // Trigger immediate ML prediction for the active scenario
+      triggerMlPrediction(datasetEngine.currentCycleNumber, selected.id);
+
+      io.emit('system_status', {
+        mode: getMode(),
+        dataMode: getMode(),
+        scenarioId: selected.id,
+        scenarioName: selected.name,
+        dataSource: selected.dataSource,
+        cycleNumber: datasetEngine.currentCycleNumber,
+        status: simulator.status
+      });
     });
 
     socket.on('simulation:setMode', async (newMode) => {
@@ -151,7 +257,7 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
     });
 
     socket.on('simulation:selectCycle', async (cycleNum) => {
-      const parsedCycle = Math.max(1, Math.min(2205, parseInt(cycleNum, 10) || 1));
+      const parsedCycle = Math.max(1, Math.min(datasetEngine.maxCycles, parseInt(cycleNum, 10) || 1));
       datasetEngine.currentCycleNumber = parsedCycle;
       console.log(`[SocketHandler] Dataset cycle selected: ${parsedCycle}`);
       
@@ -199,4 +305,3 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
     });
   });
 }
-

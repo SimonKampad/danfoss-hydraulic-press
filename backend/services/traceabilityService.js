@@ -141,10 +141,15 @@ export class TraceabilityService {
       };
     }
 
+    const scenarioName = mlPrediction?.scenarioName || 'Normal Operation';
+    const dataSource = mlPrediction?.dataSource || 'ORIGINAL_DATASET_REPLAY';
+
     const newRecord = {
       recordId: `REC-20261006-${String(cycleNumber).padStart(4, '0')}`,
       cycleNumber,
       timestamp,
+      scenario: scenarioName,
+      dataSource,
       pressure: { peakBar: pMax, avgBar: pAvg, unit: 'bar' },
       flow: { peakLmin: qMax, avgLmin: qAvg, unit: 'L/min' },
       temperature: { maxC: tMax, unit: '°C' },

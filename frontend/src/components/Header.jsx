@@ -4,6 +4,7 @@ import {
   Play,
   Pause,
   RotateCcw,
+  Octagon,
   Radio,
   Database,
   LayoutDashboard,
@@ -22,6 +23,7 @@ export function Header({
   setActiveTab
 }) {
   const isRunning = systemStatus.status === 'RUNNING';
+  const isStopped = systemStatus.status === 'STOPPED';
   const isDatasetMode = (systemStatus.mode || systemStatus.dataMode) === 'DATASET_REPLAY';
   const activeCycleNum = systemStatus.cycleNumber || 1;
 
@@ -112,20 +114,32 @@ export function Header({
           {isRunning ? (
             <button
               onClick={controls.pauseSimulation}
-              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg transition shadow-2xs active:scale-95 cursor-pointer font-mono"
+              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-2xs active:scale-95 cursor-pointer font-mono"
             >
               <Pause className="w-3.5 h-3.5 fill-current" />
               <span>PAUSE</span>
             </button>
           ) : (
             <button
-              onClick={controls.startSimulation}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg transition shadow-2xs active:scale-95 cursor-pointer font-mono"
+              onClick={() => {
+                if (isStopped && controls.resumeSimulation) controls.resumeSimulation();
+                else controls.startSimulation();
+              }}
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-2xs active:scale-95 cursor-pointer font-mono"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
-              <span>START</span>
+              <span>{isStopped ? 'RESUME' : 'START'}</span>
             </button>
           )}
+
+          <button
+            onClick={controls.stopSimulation}
+            className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white text-xs font-extrabold px-3 py-1.5 rounded-lg transition shadow-2xs active:scale-95 cursor-pointer font-mono ring-1 ring-rose-400"
+            title="Stop Software Simulation"
+          >
+            <Octagon className="w-3.5 h-3.5 fill-current" />
+            <span className="hidden sm:inline">STOP</span>
+          </button>
 
           <button
             onClick={controls.resetSimulation}

@@ -140,6 +140,26 @@ class PredictionResponse(BaseModel):
 
 
 @app.get(
+    "/",
+    summary="Root service probe",
+    tags=["Health"]
+)
+def root():
+    """Root service information and health probe."""
+    is_loaded = predictor is not None and len(predictor.models) == 4
+    return {
+        "service": "Danfoss Hydraulic Press ML Inference API",
+        "status": "online",
+        "models_loaded": is_loaded,
+        "endpoints": {
+            "health": "/health",
+            "predict": "/predict",
+            "docs": "/docs"
+        }
+    }
+
+
+@app.get(
     "/health",
     response_model=HealthResponse,
     summary="Health check endpoint",

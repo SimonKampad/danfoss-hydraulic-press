@@ -33,6 +33,14 @@ export class HydraulicSimulator {
     this.onPhaseChangeListeners = [];
     this.onAlertListeners = [];
 
+    // Alert hysteresis tracking to prevent notification flicker
+    this.activeAlarmStates = {
+      pressureAlarm: false,
+      pressureWarn: false,
+      tempAlarm: false,
+      tempWarn: false
+    };
+
     this.timer = null;
   }
 
@@ -60,6 +68,20 @@ export class HydraulicSimulator {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+  }
+
+  stop() {
+    this.status = 'STOPPED';
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  resume() {
+    if (this.status === 'PAUSED' || this.status === 'STOPPED') {
+      this.start();
     }
   }
 
@@ -325,50 +347,86 @@ export class HydraulicSimulator {
   }
 
   checkThresholds(data) {
-    // Check Pressure threshold
-    if (data.pressureBar > SIMULATION_THRESHOLDS.pressureAlarmBar) {
-      this.notifyAlert({
-        id: `alt-p-alarm-${Date.now()}`,
-        timestamp: data.timestamp,
-        type: 'HIGH_PRESSURE_ALARM',
-        severity: 'ALARM',
-        message: `High Pressure Warning: ${data.pressureBar} bar exceeds simulation threshold (${SIMULATION_THRESHOLDS.pressureAlarmBar} bar)`,
-        value: `${data.pressureBar} bar`,
-        source: 'PRESSURE_SENSOR'
-      });
-    } else if (data.pressureBar > SIMULATION_THRESHOLDS.pressureWarningBar) {
-      this.notifyAlert({
-        id: `alt-p-warn-${Date.now()}`,
-        timestamp: data.timestamp,
-        type: 'HIGH_PRESSURE_WARN',
-        severity: 'WARNING',
-        message: `Pressure Warning: ${data.pressureBar} bar near threshold (${SIMULATION_THRESHOLDS.pressureWarningBar} bar)`,
-        value: `${data.pressureBar} bar`,
-        source: 'PRESSURE_SENSOR'
-      });
+    const P_ALARM = SIMULATION_THRESHOLDS.pressureAlarmBar; // 235.0 bar
+    const P_WARN = SIMULATION_THRESHOLDS.pressureWarningBar; // 210.0 bar
+    const P_HYST = 3.0; // 3 bar hysteresis
+
+    const T_ALARM = SIMULATION_THRESHOLDS.temperatureAlarmC; // 65.0 °C
+    const T_WARN = SIMULATION_THRESHOLDS.temperatureWarningC; // 55.0 °C
+    const T_HYST = 2.0; // 2 °C hysteresis
+
+    // Check Pressure threshold with hysteresis
+    if (data.pressureBar >= P_ALARM) {
+      if (!this.activeAlarmStates.pressureAlarm) {
+        this.activeAlarmStates.pressureAlarm = true;
+        this.notifyAlert({
+          id: `alt-p-stop-${Date.now()}`,
+          timestamp: data.timestamp,
+          type: 'HIGH_PRESSURE_ALARM',
+          severity: 'ALARM',
+          message: `STOP — HIGH PRESSURE: Measured ${data.pressureBar} bar exceeds emergency limit (${P_ALARM} bar)`,
+          measuredValue: `${data.pressureBar} bar`,
+          thresholdLimit: `${P_ALARM} bar`,
+          source: 'PRESSURE_SENSOR'
+        });
+      }
+    } else if (data.pressureBar < (P_ALARM - P_HYST)) {
+      this.activeAlarmStates.pressureAlarm = false;
     }
 
-    // Check Temperature threshold
-    if (data.temperatureC > SIMULATION_THRESHOLDS.temperatureAlarmC) {
-      this.notifyAlert({
-        id: `alt-t-alarm-${Date.now()}`,
-        timestamp: data.timestamp,
-        type: 'HIGH_TEMP_ALARM',
-        severity: 'ALARM',
-        message: `Oil Temperature Alarm: ${data.temperatureC} °C exceeds threshold (${SIMULATION_THRESHOLDS.temperatureAlarmC} °C)`,
-        value: `${data.temperatureC} °C`,
-        source: 'TEMP_SENSOR'
-      });
-    } else if (data.temperatureC > SIMULATION_THRESHOLDS.temperatureWarningC) {
-      this.notifyAlert({
-        id: `alt-t-warn-${Date.now()}`,
-        timestamp: data.timestamp,
-        type: 'THERMAL_DRIFT',
-        severity: 'WARNING',
-        message: `Thermal Drift Warning: Oil temperature ${data.temperatureC} °C elevated above baseline`,
-        value: `${data.temperatureC} °C`,
-        source: 'TEMP_SENSOR'
-      });
+    if (data.pressureBar >= P_WARN && data.pressureBar < P_ALARM) {
+      if (!this.activeAlarmStates.pressureWarn) {
+        this.activeAlarmStates.pressureWarn = true;
+        this.notifyAlert({
+          id: `alt-p-warn-${Date.now()}`,
+          timestamp: data.timestamp,
+          type: 'HIGH_PRESSURE_WARN',
+          severity: 'WARNING',
+          message: `Pressure Warning: System pressure ${data.pressureBar} bar near operating limit (${P_WARN} bar)`,
+          measuredValue: `${data.pressureBar} bar`,
+          thresholdLimit: `${P_WARN} bar`,
+          source: 'PRESSURE_SENSOR'
+        });
+      }
+    } else if (data.pressureBar < (P_WARN - P_HYST)) {
+      this.activeAlarmStates.pressureWarn = false;
+    }
+
+    // Check Temperature threshold with hysteresis
+    if (data.temperatureC >= T_ALARM) {
+      if (!this.activeAlarmStates.tempAlarm) {
+        this.activeAlarmStates.tempAlarm = true;
+        this.notifyAlert({
+          id: `alt-t-alarm-${Date.now()}`,
+          timestamp: data.timestamp,
+          type: 'HIGH_TEMP_ALARM',
+          severity: 'ALARM',
+          message: `Oil Temperature Alarm: Measured ${data.temperatureC} °C exceeds threshold (${T_ALARM} °C)`,
+          measuredValue: `${data.temperatureC} °C`,
+          thresholdLimit: `${T_ALARM} °C`,
+          source: 'TEMP_SENSOR'
+        });
+      }
+    } else if (data.temperatureC < (T_ALARM - T_HYST)) {
+      this.activeAlarmStates.tempAlarm = false;
+    }
+
+    if (data.temperatureC >= T_WARN && data.temperatureC < T_ALARM) {
+      if (!this.activeAlarmStates.tempWarn) {
+        this.activeAlarmStates.tempWarn = true;
+        this.notifyAlert({
+          id: `alt-t-warn-${Date.now()}`,
+          timestamp: data.timestamp,
+          type: 'THERMAL_DRIFT',
+          severity: 'WARNING',
+          message: `Thermal Drift Warning: Oil temperature ${data.temperatureC} °C elevated above baseline (${T_WARN} °C)`,
+          measuredValue: `${data.temperatureC} °C`,
+          thresholdLimit: `${T_WARN} °C`,
+          source: 'TEMP_SENSOR'
+        });
+      }
+    } else if (data.temperatureC < (T_WARN - T_HYST)) {
+      this.activeAlarmStates.tempWarn = false;
     }
 
     // Check Motor Current threshold

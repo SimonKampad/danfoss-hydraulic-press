@@ -6,10 +6,15 @@ export function useRealtimeData() {
   const [systemStatus, setSystemStatus] = useState({
     status: 'RUNNING',
     speedMultiplier: 1.0,
-    mode: 'SIMULATION',
-    dataMode: 'SIMULATION',
+    mode: 'DATASET_REPLAY',
+    dataMode: 'DATASET_REPLAY',
     cycleNumber: 1,
-    activeFault: null
+    activeFault: null,
+    scenarioId: 'NORMAL_OPERATION',
+    scenarioName: 'Normal Operation',
+    dataSource: 'ORIGINAL_DATASET_REPLAY',
+    fastApiStatus: 'UNKNOWN',
+    fastApiAvailable: false
   });
 
   const [currentPacket, setCurrentPacket] = useState(null);
@@ -55,7 +60,8 @@ export function useRealtimeData() {
           temperature: data.temperatureC,
           motorCurrent: data.motorCurrentA,
           phase: data.phase,
-          cycle: data.cycleNumber
+          cycle: data.cycleNumber,
+          scenarioId: data.scenarioId
         }];
         if (next.length > 120) next.shift();
         return next;
@@ -79,11 +85,17 @@ export function useRealtimeData() {
     }
 
     function onAlertEvent(alert) {
-      setAlerts((prev) => [alert, ...prev.slice(0, 49)]);
+      setAlerts((prev) => {
+        // Prevent duplicate alert spam
+        const isDuplicate = prev.some(a => a.message === alert.message && (Date.now() - new Date(a.timestamp).getTime()) < 5000);
+        if (isDuplicate) return prev;
+        return [alert, ...prev.slice(0, 49)];
+      });
+
       setEventLog((prev) => [{
-        id: alert.id,
-        timestamp: alert.timestamp,
-        timeFormatted: new Date(alert.timestamp).toLocaleTimeString(),
+        id: alert.id || `alt-${Date.now()}`,
+        timestamp: alert.timestamp || new Date().toISOString(),
+        timeFormatted: new Date(alert.timestamp || Date.now()).toLocaleTimeString(),
         event: alert.message,
         severity: alert.severity,
         source: alert.source
@@ -141,6 +153,8 @@ export function useRealtimeData() {
 
   const startSimulation = useCallback(() => socket.emit('simulation:start'), []);
   const pauseSimulation = useCallback(() => socket.emit('simulation:pause'), []);
+  const stopSimulation = useCallback(() => socket.emit('simulation:stop'), []);
+  const resumeSimulation = useCallback(() => socket.emit('simulation:resume'), []);
   const resetSimulation = useCallback(() => {
     socket.emit('simulation:reset');
     setChartHistory([]);
@@ -148,6 +162,7 @@ export function useRealtimeData() {
     setAlerts([]);
     setEventLog([]);
   }, []);
+  const selectScenario = useCallback((scenarioId) => socket.emit('scenario:select', scenarioId), []);
   const setSpeedMultiplier = useCallback((mult) => socket.emit('simulation:setSpeed', mult), []);
   const injectFault = useCallback((type, severity = 'WARNING') => socket.emit('simulation:injectFault', { type, severity }), []);
   const clearFault = useCallback(() => socket.emit('simulation:clearFault'), []);
@@ -178,7 +193,10 @@ export function useRealtimeData() {
     controls: {
       startSimulation,
       pauseSimulation,
+      stopSimulation,
+      resumeSimulation,
       resetSimulation,
+      selectScenario,
       setSpeedMultiplier,
       injectFault,
       clearFault,
@@ -190,4 +208,3 @@ export function useRealtimeData() {
     }
   };
 }
-
