@@ -15,10 +15,6 @@ import {
 } from 'recharts';
 import {
   Clock,
-  FastForward,
-  Wrench,
-  PauseCircle,
-  ArrowUpCircle,
   Activity,
   Gauge,
   Wind,
@@ -26,7 +22,6 @@ import {
   Layers,
   Info,
   Sliders,
-  CheckCircle2,
   PlayCircle
 } from 'lucide-react';
 
@@ -215,19 +210,24 @@ export function CycleAnalysisView({
 
   // Current Phase Display Details for Information Panel
   let currentPhaseLabel = 'FAST DOWN';
+  let targetSpeedDisplay = '200 mm/s';
   let activePhaseColorClass = 'bg-sky-600 text-white';
 
   if (isCycleComplete) {
     currentPhaseLabel = 'CYCLE COMPLETE';
+    targetSpeedDisplay = '0 mm/s';
     activePhaseColorClass = 'bg-emerald-600 text-white animate-pulse';
   } else if (activePhaseKey === 'WORKING') {
     currentPhaseLabel = 'WORKING';
+    targetSpeedDisplay = '10 mm/s';
     activePhaseColorClass = 'bg-rose-600 text-white';
   } else if (activePhaseKey === 'HOLDING') {
     currentPhaseLabel = 'HOLDING';
+    targetSpeedDisplay = '0 mm/s';
     activePhaseColorClass = 'bg-amber-600 text-white';
   } else if (activePhaseKey === 'FAST_UP') {
     currentPhaseLabel = 'FAST UP';
+    targetSpeedDisplay = '200 mm/s';
     activePhaseColorClass = 'bg-emerald-600 text-white';
   }
 

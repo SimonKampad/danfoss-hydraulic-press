@@ -46,13 +46,14 @@ export function useRealtimeData() {
   });
 
   const isPausedTableRef = useRef(isPausedTable);
-  isPausedTableRef.current = isPausedTable;
-
   const criticalAlertRef = useRef(criticalAlert);
-  criticalAlertRef.current = criticalAlert;
-
   const systemStatusRef = useRef(systemStatus);
-  systemStatusRef.current = systemStatus;
+
+  useEffect(() => {
+    isPausedTableRef.current = isPausedTable;
+    criticalAlertRef.current = criticalAlert;
+    systemStatusRef.current = systemStatus;
+  }, [isPausedTable, criticalAlert, systemStatus]);
 
   useEffect(() => {
     function onConnect() {
