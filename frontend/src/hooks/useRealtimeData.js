@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { socket } from '../services/socket';
 
+const getBackendUrl = () => {
+  if (import.meta.env.VITE_BACKEND_URL) return import.meta.env.VITE_BACKEND_URL;
+  const hostname = window.location.hostname || 'localhost';
+  return `http://${hostname}:5000`;
+};
+
 export function useRealtimeData() {
   const [connected, setConnected] = useState(socket.connected);
   const [systemStatus, setSystemStatus] = useState({
@@ -30,8 +36,23 @@ export function useRealtimeData() {
   const [alerts, setAlerts] = useState([]);
   const [eventLog, setEventLog] = useState([]);
 
+  // Critical Alert State Machine:
+  // 'NORMAL' -> 'CRITICAL_ALERT' -> 'STOPPING' -> 'SIMULATION_STOPPED'
+  const [criticalAlert, setCriticalAlert] = useState({
+    state: 'NORMAL',
+    alertData: null,
+    stopError: null,
+    acknowledgedExcursionId: null
+  });
+
   const isPausedTableRef = useRef(isPausedTable);
   isPausedTableRef.current = isPausedTable;
+
+  const criticalAlertRef = useRef(criticalAlert);
+  criticalAlertRef.current = criticalAlert;
+
+  const systemStatusRef = useRef(systemStatus);
+  systemStatusRef.current = systemStatus;
 
   useEffect(() => {
     function onConnect() {
@@ -44,10 +65,87 @@ export function useRealtimeData() {
 
     function onSystemStatus(data) {
       setSystemStatus((prev) => ({ ...prev, ...data }));
+
+      // If backend confirms STOPPED and we were in active alert or stopping,
+      // transition to SIMULATION_STOPPED and close the blocking modal
+      if (data.status === 'STOPPED') {
+        setCriticalAlert((prev) => {
+          if (prev.state === 'CRITICAL_ALERT' || prev.state === 'STOPPING') {
+            return {
+              ...prev,
+              state: 'SIMULATION_STOPPED',
+              stopError: null
+            };
+          }
+          return prev;
+        });
+      }
     }
 
     function onSensorData(data) {
+      // If simulation is stopped because of high pressure, do not advance incoming telemetry
+      if (criticalAlertRef.current.state === 'SIMULATION_STOPPED') {
+        return;
+      }
+
       setCurrentPacket(data);
+
+      // High pressure alarm evaluation (threshold: 235.0 bar)
+      const pressureVal = typeof data.pressureBar === 'number' ? data.pressureBar : 0;
+      const P_ALARM_LIMIT = 235.0;
+
+      if (pressureVal >= P_ALARM_LIMIT || data.alert?.type === 'HIGH_PRESSURE_ALARM') {
+        // Only trigger initial critical alert if currently NORMAL (prevents duplicate spam/popups)
+        if (criticalAlertRef.current.state === 'NORMAL') {
+          const excursionId = `excursion-${data.cycleNumber || 1}-${Date.now()}`;
+          const alertRecord = {
+            id: excursionId,
+            title: 'HIGH PRESSURE DETECTED — STOP THE MACHINE SIMULATION',
+            measuredPressure: Number(pressureVal.toFixed(1)),
+            thresholdLimit: P_ALARM_LIMIT,
+            cycleNumber: data.cycleNumber || systemStatusRef.current.cycleNumber || 1,
+            timestamp: data.timeMs
+              ? new Date(data.timeMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+              : new Date().toLocaleTimeString(),
+            isoTimestamp: new Date().toISOString(),
+            message: 'Pressure is above the permitted limit. Stop the simulation and inspect the system.',
+            sensor: 'PS1'
+          };
+
+          setCriticalAlert({
+            state: 'CRITICAL_ALERT',
+            alertData: alertRecord,
+            stopError: null,
+            acknowledgedExcursionId: excursionId
+          });
+
+          // Log into historical alerts list
+          setAlerts((prev) => [
+            {
+              id: alertRecord.id,
+              type: 'HIGH_PRESSURE_ALARM',
+              severity: 'ALARM',
+              message: `STOP — HIGH PRESSURE: Measured ${alertRecord.measuredPressure} bar exceeds permitted limit (${P_ALARM_LIMIT} bar)`,
+              timestamp: alertRecord.isoTimestamp,
+              source: 'PS1'
+            },
+            ...prev.slice(0, 49)
+          ]);
+
+          // Log into system event sequence
+          setEventLog((prev) => [
+            {
+              id: `evt-${Date.now()}`,
+              timestamp: alertRecord.isoTimestamp,
+              timeFormatted: alertRecord.timestamp,
+              event: `HIGH PRESSURE EXCURSION (${alertRecord.measuredPressure} bar) - STOP REQUIRED`,
+              severity: 'ALARM',
+              source: 'PS1'
+            },
+            ...prev.slice(0, 49)
+          ]);
+        }
+      }
 
       // Rolling chart window (max 120 data points)
       setChartHistory((prev) => {
@@ -86,7 +184,7 @@ export function useRealtimeData() {
 
     function onAlertEvent(alert) {
       setAlerts((prev) => {
-        // Prevent duplicate alert spam
+        // Prevent duplicate alert spam within 5 seconds
         const isDuplicate = prev.some(a => a.message === alert.message && (Date.now() - new Date(a.timestamp).getTime()) < 5000);
         if (isDuplicate) return prev;
         return [alert, ...prev.slice(0, 49)];
@@ -151,17 +249,130 @@ export function useRealtimeData() {
     };
   }, []);
 
-  const startSimulation = useCallback(() => socket.emit('simulation:start'), []);
-  const pauseSimulation = useCallback(() => socket.emit('simulation:pause'), []);
-  const stopSimulation = useCallback(() => socket.emit('simulation:stop'), []);
-  const resumeSimulation = useCallback(() => socket.emit('simulation:resume'), []);
-  const resetSimulation = useCallback(() => {
+  const startSimulation = useCallback(() => {
+    socket.emit('simulation:start');
+    try {
+      fetch(`${getBackendUrl()}/api/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start' })
+      }).catch(() => {});
+    } catch (_) {}
+  }, []);
+
+  const pauseSimulation = useCallback(() => {
+    socket.emit('simulation:pause');
+    try {
+      fetch(`${getBackendUrl()}/api/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pause' })
+      }).catch(() => {});
+    } catch (_) {}
+  }, []);
+
+  const resumeSimulation = useCallback(() => {
+    socket.emit('simulation:resume');
+    try {
+      fetch(`${getBackendUrl()}/api/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'resume' })
+      }).catch(() => {});
+    } catch (_) {}
+  }, []);
+
+  // Single authoritative stop simulation handler
+  const stopSimulation = useCallback(async () => {
+    // If in critical alert state, switch to STOPPING
+    if (criticalAlertRef.current.state === 'CRITICAL_ALERT') {
+      setCriticalAlert((prev) => ({ ...prev, state: 'STOPPING', stopError: null }));
+    }
+
+    try {
+      // 1. Send via Socket.IO
+      socket.emit('simulation:stop');
+
+      // 2. Also send via REST API with timeout to confirm backend response
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+      const res = await fetch(`${getBackendUrl()}/api/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'stop' }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error('Backend failed to confirm simulation stop');
+      }
+
+      // Backend stop confirmed!
+      setSystemStatus((prev) => ({ ...prev, status: 'STOPPED' }));
+
+      // Close blocking modal and transition to persistent SIMULATION_STOPPED state
+      setCriticalAlert((prev) => {
+        if (prev.state === 'CRITICAL_ALERT' || prev.state === 'STOPPING') {
+          return {
+            ...prev,
+            state: 'SIMULATION_STOPPED',
+            stopError: null
+          };
+        }
+        return prev;
+      });
+
+      return { success: true };
+    } catch (err) {
+      console.error('[useRealtimeData] Stop simulation request failed:', err);
+      // Keep alert visible and display clear error
+      setCriticalAlert((prev) => {
+        if (prev.state === 'STOPPING' || prev.state === 'CRITICAL_ALERT') {
+          return {
+            ...prev,
+            state: 'CRITICAL_ALERT',
+            stopError: err.message || 'Network error: backend did not confirm stop'
+          };
+        }
+        return prev;
+      });
+      return { success: false, error: err.message };
+    }
+  }, []);
+
+  // Reset handler: sends reset to backend, resets charts, preserves historical records
+  const resetSimulation = useCallback(async () => {
     socket.emit('simulation:reset');
+    try {
+      await fetch(`${getBackendUrl()}/api/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reset' })
+      });
+    } catch (err) {
+      console.warn('[useRealtimeData] REST reset call error:', err);
+    }
+
+    // Reset rolling live chart window and table
     setChartHistory([]);
     setDataTable([]);
-    setAlerts([]);
-    setEventLog([]);
+
+    // NOTE: Preserving historical alert records and digital records
+    // Returning criticalAlert state to NORMAL so future runs can operate cleanly
+    setCriticalAlert({
+      state: 'NORMAL',
+      alertData: null,
+      stopError: null,
+      acknowledgedExcursionId: null
+    });
   }, []);
+
   const selectScenario = useCallback((scenarioId) => socket.emit('scenario:select', scenarioId), []);
   const setSpeedMultiplier = useCallback((mult) => socket.emit('simulation:setSpeed', mult), []);
   const injectFault = useCallback((type, severity = 'WARNING') => socket.emit('simulation:injectFault', { type, severity }), []);
@@ -190,6 +401,7 @@ export function useRealtimeData() {
     digitalRecords,
     alerts,
     eventLog,
+    criticalAlert,
     controls: {
       startSimulation,
       pauseSimulation,

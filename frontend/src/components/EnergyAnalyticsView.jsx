@@ -16,15 +16,8 @@ import {
   Zap,
   Activity,
   BarChart3,
-  Clock,
   PieChart,
-  Info,
-  CheckCircle2,
-  AlertCircle,
-  Gauge,
-  Wind,
-  Layers,
-  Sparkles
+  Info
 } from 'lucide-react';
 
 const CustomEnergyTooltip = ({ active, payload, label }) => {
@@ -159,7 +152,7 @@ export function EnergyAnalyticsView({
   });
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto font-sans">
+    <div className="space-y-6 w-full font-sans">
       
       {/* 1. HEADER BANNER */}
       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">

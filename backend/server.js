@@ -213,6 +213,11 @@ app.post('/api/control', (req, res) => {
     systemMode = value;
     io.emit('system_status', { mode: systemMode });
   }
+  io.emit('system_status', {
+    status: simulator.status,
+    speedMultiplier: simulator.speedMultiplier,
+    mode: systemMode
+  });
   res.json({ success: true, status: simulator.status, mode: systemMode });
 });
 

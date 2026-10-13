@@ -104,7 +104,7 @@ export function ParameterOptimizationView({
   const simWhSavings = parseFloat((currentCycleWh - simCycleWh).toFixed(2));
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto font-sans">
+    <div className="space-y-6 w-full font-sans">
       
       {/* 1. HEADER BANNER */}
       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">

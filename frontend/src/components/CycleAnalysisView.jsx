@@ -215,29 +215,19 @@ export function CycleAnalysisView({
 
   // Current Phase Display Details for Information Panel
   let currentPhaseLabel = 'FAST DOWN';
-  let targetSpeedDisplay = '200 mm/s';
-  let targetStrokeDisplay = '200 mm (Downward Stroke)';
   let activePhaseColorClass = 'bg-sky-600 text-white';
 
   if (isCycleComplete) {
     currentPhaseLabel = 'CYCLE COMPLETE';
-    targetSpeedDisplay = '0 mm/s';
-    targetStrokeDisplay = 'Cycle Complete';
     activePhaseColorClass = 'bg-emerald-600 text-white animate-pulse';
   } else if (activePhaseKey === 'WORKING') {
     currentPhaseLabel = 'WORKING';
-    targetSpeedDisplay = '10 mm/s';
-    targetStrokeDisplay = '50 mm (High Force Pressing)';
     activePhaseColorClass = 'bg-rose-600 text-white';
   } else if (activePhaseKey === 'HOLDING') {
     currentPhaseLabel = 'HOLDING';
-    targetSpeedDisplay = '0 mm/s';
-    targetStrokeDisplay = '0 mm (9 Ton Load Hold)';
     activePhaseColorClass = 'bg-amber-600 text-white';
   } else if (activePhaseKey === 'FAST_UP') {
     currentPhaseLabel = 'FAST UP';
-    targetSpeedDisplay = '200 mm/s';
-    targetStrokeDisplay = '250 mm (Return to Home)';
     activePhaseColorClass = 'bg-emerald-600 text-white';
   }
 
@@ -245,7 +235,7 @@ export function CycleAnalysisView({
   const getRecentHistory = () => chartHistory.slice(-60);
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 w-full">
       
       {/* 1. TOP LIVE CYCLE MONITOR & PROGRESSIVE GRAPH CONTAINER */}
       <div className="bg-white p-5 lg:p-7 rounded-xl border border-slate-200 shadow-xs space-y-6">
