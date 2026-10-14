@@ -147,14 +147,14 @@ export function Header({
             <button
               type="button"
               onClick={() => {
-                if (isStopped && controls.resumeSimulation) controls.resumeSimulation();
+                if ((isStopped || isPaused) && controls.resumeSimulation) controls.resumeSimulation();
                 else controls.startSimulation();
               }}
               className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-2xs active:scale-95 cursor-pointer font-mono"
-              title={isStopped ? "Resume Simulation" : "Start Simulation"}
+              title={isStopped || isPaused ? "Resume Simulation" : "Start Simulation"}
             >
               <Play className="w-3.5 h-3.5 fill-current" />
-              <span>{isStopped ? 'RESUME' : 'START'}</span>
+              <span>{isStopped || isPaused ? 'RESUME' : 'START'}</span>
             </button>
           )}
 

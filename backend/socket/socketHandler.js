@@ -48,6 +48,9 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
 
   // Simulator event subscriptions
   simulator.onData(async (sensorPacket) => {
+    // Strictly halt any telemetry broadcast if the simulation is stopped or paused
+    if (simulator.status !== 'RUNNING') return;
+
     const mode = getMode ? getMode() : 'SIMULATION';
     const activeScenarioId = datasetEngine?.currentScenarioId || 'NORMAL_OPERATION';
     const activeScenario = SCENARIOS[activeScenarioId] || SCENARIOS.NORMAL_OPERATION;
@@ -72,6 +75,9 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
         const progressRatio = (simulator.cycleElapsedTime % totalCycleDuration) / totalCycleDuration;
         const frame = datasetEngine.generateTelemetryFrame(rawSensors, cycleNum, progressRatio, simulator.totalElapsedTime, activeScenarioId);
         
+        // Double check status before emitting in case stop was received during async raw sensors load
+        if (simulator.status !== 'RUNNING') return;
+
         performanceService.recordData(frame);
         analyticsService.processSample(frame);
         
@@ -84,6 +90,7 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
         }
       } catch (err) {
         // Safe fallback if raw dataset read hiccup
+        if (simulator.status !== 'RUNNING') return;
         io.emit('sensor_data', {
           ...sensorPacket,
           dataMode: 'DATASET_REPLAY',
@@ -96,6 +103,7 @@ export function setupSocketHandler(io, simulator, performanceService, analyticsS
   });
 
   simulator.onPhaseChange((event) => {
+    if (simulator.status !== 'RUNNING') return;
     const mode = getMode ? getMode() : 'SIMULATION';
     io.emit('cycle_event', event);
     io.emit('performance_update', performanceService.getStats());

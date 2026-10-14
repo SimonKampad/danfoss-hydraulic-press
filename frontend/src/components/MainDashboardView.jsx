@@ -119,6 +119,11 @@ export function MainDashboardView({
   const isHighTempWarn = tempVal >= 55.0;
   const isLowFlowWarn = flowVal <= 5.0 && (currentPacket?.phase === 'FAST_DOWN' || currentPacket?.phase === 'FAST_UP');
 
+  const status = systemStatus?.status || 'RUNNING';
+  const isRunning = status === 'RUNNING';
+  const isPaused = status === 'PAUSED';
+  const isStopped = status === 'STOPPED';
+
   // Chart data helpers
   const recentHistory = useMemo(() => chartHistory.slice(-40), [chartHistory]);
   const cycleTrajectoryData = useMemo(() => getCycleTrajectory(), []);
@@ -174,7 +179,7 @@ export function MainDashboardView({
                 {activeScenarioName}
               </div>
               <div className="text-[10px] font-mono text-slate-500">
-                Cycle #{activeCycleNum}
+                Cycle #{activeCycleNum} {isStopped ? '• [STOPPED]' : isPaused ? '• [PAUSED]' : ''}
               </div>
             </div>
           </div>
@@ -182,11 +187,15 @@ export function MainDashboardView({
           {/* Machine Condition Status */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 flex items-center gap-3">
             <div className={`p-3 rounded-xl border shrink-0 ${
-              isHighPressureAlarm
-                ? 'bg-rose-50 text-rose-600 border-rose-300 ring-2 ring-rose-200'
-                : machineCondition === 'NORMAL'
-                  ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
-                  : 'bg-amber-50 text-amber-600 border-amber-200'
+              isStopped
+                ? 'bg-rose-50 text-rose-600 border-rose-300'
+                : isPaused
+                  ? 'bg-amber-50 text-amber-600 border-amber-300'
+                  : isHighPressureAlarm
+                    ? 'bg-rose-50 text-rose-600 border-rose-300 ring-2 ring-rose-200'
+                    : machineCondition === 'NORMAL'
+                      ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                      : 'bg-amber-50 text-amber-600 border-amber-200'
             }`}>
               <ShieldCheck className="w-5 h-5" />
             </div>
@@ -195,12 +204,18 @@ export function MainDashboardView({
                 Machine Condition
               </div>
               <div className={`text-sm sm:text-base font-extrabold font-mono mt-0.5 ${
-                isHighPressureAlarm ? 'text-rose-700 animate-pulse' : (machineCondition === 'NORMAL' ? 'text-emerald-700' : 'text-amber-700')
+                isStopped
+                  ? 'text-rose-700'
+                  : isPaused
+                    ? 'text-amber-700'
+                    : isHighPressureAlarm
+                      ? 'text-rose-700 animate-pulse'
+                      : (machineCondition === 'NORMAL' ? 'text-emerald-700' : 'text-amber-700')
               }`}>
-                {isHighPressureAlarm ? 'CRITICAL ALARM' : machineCondition}
+                {isStopped ? 'STOPPED' : isPaused ? 'PAUSED' : isHighPressureAlarm ? 'CRITICAL ALARM' : machineCondition}
               </div>
               <div className="text-[10px] font-mono text-slate-500">
-                Score: {diagnosticScore}% &bull; {anomalyStatus}
+                {isStopped ? 'Software Stream Halted' : isPaused ? 'Software Stream Paused' : `Score: ${diagnosticScore}% • ${anomalyStatus}`}
               </div>
             </div>
           </div>
@@ -275,8 +290,17 @@ export function MainDashboardView({
             <Activity className="w-4 h-4 text-blue-600" />
             Primary Sensor Readings
           </h2>
-          <span className="text-xs font-mono text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-md font-semibold">
-            Live Telemetry Stream
+          <span className={`text-xs font-mono px-3 py-1 rounded-md font-bold border flex items-center gap-1.5 ${
+            isStopped
+              ? 'bg-rose-50 text-rose-700 border-rose-200'
+              : isPaused
+                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${
+              isRunning ? 'bg-emerald-500 animate-pulse' : isPaused ? 'bg-amber-500' : 'bg-rose-500'
+            }`} />
+            <span>{isStopped ? 'SIMULATION STOPPED' : isPaused ? 'SIMULATION PAUSED' : 'Live Telemetry Stream'}</span>
           </span>
         </div>
 
@@ -453,8 +477,17 @@ export function MainDashboardView({
               Continuous telemetry stream for primary operating metrics
             </p>
           </div>
-          <span className="text-xs font-mono text-slate-500 bg-slate-50 px-3 py-1 rounded border border-slate-200 font-bold">
-            Live Stream
+          <span className={`text-xs font-mono px-3 py-1 rounded border font-bold flex items-center gap-1.5 ${
+            isStopped
+              ? 'bg-rose-50 text-rose-700 border-rose-200'
+              : isPaused
+                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              isRunning ? 'bg-emerald-500 animate-pulse' : isPaused ? 'bg-amber-500' : 'bg-rose-500'
+            }`} />
+            {isStopped ? 'Telemetry Frozen (STOPPED)' : isPaused ? 'Telemetry Frozen (PAUSED)' : 'Live Stream'}
           </span>
         </div>
 
